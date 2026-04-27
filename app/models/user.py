@@ -15,8 +15,11 @@ class User(BaseModel):
 
     username = Column(String(length=64), unique=True, index=True, nullable=False)
     email = Column(String(length=64), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(length=128), nullable=False)
+    hashed_password = Column(String(length=128), nullable=True)  # nullable in case of external auth
     is_active = Column(Boolean, default=True, server_default=true(), nullable=False)
+
+    # external auth
+    google_id = Column(String(length=128), unique=True, index=True, nullable=True)
 
     # Preferences
     week_start_day = Column(String(length=32), default=WeekStartDay.MONDAY, nullable=False)

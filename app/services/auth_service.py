@@ -1,5 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from app.const.auth import SIGNING_ALGORITHM, TokenType
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
+from app.schemas.auth import GoogleTokenInfo
 from app.services.auth_utils import validate_password, create_access_token, create_refresh_token
 from app.services.user_service import UserService
 
@@ -74,7 +77,6 @@ class AuthService:
         user = UserService.get_user_by_id(db, user_id=user_id)
         return user
 
-
     @classmethod
     async def get_current_user(cls, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
         """ Gets the current user from the access token or raises an exception """
@@ -92,3 +94,21 @@ class AuthService:
             raise cls.CREDENTIALS_EXCEPTION
             
         return user
+
+    @classmethod
+    def verify_google_token(cls, token: str) -> GoogleTokenInfo | None:
+        result: GoogleTokenInfo | None
+
+        try:
+            token_info = id_token.verify_oauth2_token(
+                token,
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID
+            )
+        except ValueError:
+            # Invalid token
+            result = None
+        else:
+            result = dict(token_info)
+
+        return result

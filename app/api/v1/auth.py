@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.auth import TokenSchema, SigninSchema, RefreshTokenSchema
+from app.schemas.auth import TokenSchema, SigninSchema, RefreshTokenSchema, GoogleSigninSchema
 from app.schemas.user import UserSchema, UserCreateSchema, UserUpdateSchema, PasswordChangeSchema
 from app.services.user_service import UserService
 from app.services.auth_service import AuthService
@@ -112,3 +112,27 @@ def change_password(
             detail="User not found"
         )
     return updated_user
+
+
+@router.post('/google/', response_model=TokenSchema)
+def google_signin(signin_data: GoogleSigninSchema, db: Session = Depends(get_db)):
+    token_info = AuthService.verify_google_token(signin_data.id_token)
+    if not token_info:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Invalid Google token',
+            headers={'WWW-Authenticate': 'Bearer'},
+        )
+
+    google_id = token_info.get('sub')
+    email = token_info.get('email')
+    if not google_id or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Missing information in Google token'
+        )
+
+    user = UserService.get_or_create_google_user(db=db, google_id=google_id, email=email)
+    tokens = AuthService.create_user_tokens(user.id)
+
+    return tokens

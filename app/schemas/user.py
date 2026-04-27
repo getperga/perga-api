@@ -9,6 +9,7 @@ class UserSchema(BaseModel):
     email: str
     week_start_day: WeekStartDay
     merge_weekends: bool
+    google_id: str | None = None
 
     class Config:
         from_attributes = True

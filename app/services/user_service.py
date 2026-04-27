@@ -22,6 +22,10 @@ class UserService(BaseService[User]):
         return cls.get_base_query(db).filter(User.id == user_id).first()
 
     @classmethod
+    def get_user_by_google_id(cls, db: Session, google_id: str) -> User | None:
+        return cls.get_base_query(db).filter(User.google_id == google_id).first()
+
+    @classmethod
     def create_user(cls, db: Session, create_data: UserCreateSchema) -> User:
         # Check if user with this email or username already exists
         if cls.get_user_by_email(db, create_data.email):
@@ -75,3 +79,31 @@ class UserService(BaseService[User]):
 
         db.refresh(user)
         return user
+
+    @classmethod
+    def get_or_create_google_user(cls, db: Session, google_id: str, email: str) -> User:
+        # try to get user by google_id
+        user = cls.get_user_by_google_id(db, google_id)
+        if user:
+            return user
+
+        # try to get user by email
+        user = cls.get_user_by_email(db, email)
+        if user:
+            user.google_id = google_id  # link existing user with google_id
+            db.commit()
+            db.refresh(user)
+            return user
+
+        # create new user
+        db_user = User(
+            email=email,
+            username=email,
+            google_id=google_id,
+            is_active=True
+        )
+        db.add(db_user)
+        db.commit()
+
+        db.refresh(db_user)
+        return db_user
