@@ -18,7 +18,7 @@ class RefreshTokenSchema(BaseModel):
 
 
 class GoogleSigninSchema(BaseModel):
-    id_token: str
+    code: str
 
 
 # only used for google signin attributes

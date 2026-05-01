@@ -12,12 +12,14 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str]
     IS_DEV: bool = True
     LOGGING_LEVEL: int = logging.INFO
-    GOOGLE_CLIENT_ID: str | None = None
 
     POSTGRES_HOST: str | None = None
     POSTGRES_USER: str | None = None
     POSTGRES_PASSWORD: str | None = None
     POSTGRES_DB: str | None = None
+
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
 
     ROOT_URL_REDIRECT: str | None = None
 

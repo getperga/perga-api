@@ -4,22 +4,28 @@ from app.services.user_service import UserService
 
 
 class TestGoogleAuth:
+    @patch('app.services.auth_service.requests.post')
     @patch('app.services.auth_service.id_token.verify_oauth2_token')
-    def test_verify_google_token_success(self, mock_verify):
+    def test_exchange_google_code_success(self, mock_verify, mock_post):
+        # Mocking the exchange of code for token
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {'id_token': 'fake-id-token'}
+        
+        # Mocking the verification of id_token
         mock_verify.return_value = {
             'sub': 'google-id-123',
             'email': 'test@example.com',
         }
         
-        token_info = AuthService.verify_google_token('fake-token')
+        token_info = AuthService.exchange_google_code('fake-code')
         assert token_info is not None
         assert token_info['sub'] == 'google-id-123'
         assert token_info['email'] == 'test@example.com'
 
-    @patch('app.services.auth_service.id_token.verify_oauth2_token')
-    def test_verify_google_token_fail(self, mock_verify):
-        mock_verify.side_effect = ValueError('Invalid token')
-        token_info = AuthService.verify_google_token('invalid-token')
+    @patch('app.services.auth_service.requests.post')
+    def test_exchange_google_code_fail(self, mock_post):
+        mock_post.return_value.status_code = 400
+        token_info = AuthService.exchange_google_code('invalid-code')
         assert token_info is None
 
     def test_get_or_create_google_user_new(self, test_db):
@@ -55,22 +61,26 @@ class TestGoogleAuth:
         google_id = 'endpoint-google-id'
         email = 'endpoint@example.com'
         
-        with patch('app.services.auth_service.id_token.verify_oauth2_token') as mock_verify:
-            mock_verify.return_value = {
-                'sub': google_id,
-                'email': email,
-            }
-            
-            response = client.post(
-                '/api/v1/auth/google/',
-                json={'id_token': 'valid-google-token'}
-            )
-            
-            assert response.status_code == 200
-            data = response.json()
-            assert 'access_token' in data
-            assert 'refresh_token' in data
-            
-            user = UserService.get_user_by_google_id(test_db, google_id)
-            assert user is not None
-            assert user.email == email
+        with patch('app.services.auth_service.requests.post') as mock_post:
+            mock_post.return_value.status_code = 200
+            mock_post.return_value.json.return_value = {'id_token': 'fake-id-token'}
+
+            with patch('app.services.auth_service.id_token.verify_oauth2_token') as mock_verify:
+                mock_verify.return_value = {
+                    'sub': google_id,
+                    'email': email,
+                }
+                
+                response = client.post(
+                    '/api/v1/auth/google/',
+                    json={'code': 'valid-google-code'}
+                )
+                
+                assert response.status_code == 200
+                data = response.json()
+                assert 'access_token' in data
+                assert 'refresh_token' in data
+                
+                user = UserService.get_user_by_google_id(test_db, google_id)
+                assert user is not None
+                assert user.email == email

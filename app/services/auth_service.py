@@ -1,3 +1,4 @@
+import requests
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from google.auth.transport import requests as google_requests
@@ -23,6 +24,7 @@ class AuthService:
         detail='Could not validate credentials',
         headers={'WWW-Authenticate': 'Bearer'},
     )
+    GOOGLE_TOKENS_URL = 'https://oauth2.googleapis.com/token'
 
     @staticmethod
     def _extract_user_id(payload: dict) -> int | None:
@@ -112,3 +114,25 @@ class AuthService:
             result = dict(token_info)
 
         return result
+
+    @classmethod
+    def exchange_google_code(cls, code: str) -> GoogleTokenInfo | None:
+        """ Exchanges google auth code for tokens and returns user info """
+        data = {
+            'code': code,
+            'client_id': settings.GOOGLE_CLIENT_ID,
+            'client_secret': settings.GOOGLE_CLIENT_SECRET,
+            'redirect_uri': 'postmessage',
+            'grant_type': 'authorization_code',
+        }
+
+        response = requests.post(cls.GOOGLE_TOKENS_URL, data=data)
+        if response.status_code != 200:
+            return None
+
+        tokens = response.json()
+        id_token_str = tokens.get('id_token')
+        if not id_token_str:
+            return None
+
+        return cls.verify_google_token(id_token_str)

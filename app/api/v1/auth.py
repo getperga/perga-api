@@ -116,11 +116,11 @@ def change_password(
 
 @router.post('/google/', response_model=TokenSchema)
 def google_signin(signin_data: GoogleSigninSchema, db: Session = Depends(get_db)):
-    token_info = AuthService.verify_google_token(signin_data.id_token)
+    token_info = AuthService.exchange_google_code(signin_data.code)
     if not token_info:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Invalid Google token',
+            detail='Invalid Google auth code',
             headers={'WWW-Authenticate': 'Bearer'},
         )
 
