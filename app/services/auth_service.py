@@ -1,5 +1,8 @@
+import requests
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -7,6 +10,7 @@ from app.const.auth import SIGNING_ALGORITHM, TokenType
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
+from app.schemas.auth import GoogleTokenInfo
 from app.services.auth_utils import validate_password, create_access_token, create_refresh_token
 from app.services.user_service import UserService
 
@@ -20,6 +24,7 @@ class AuthService:
         detail='Could not validate credentials',
         headers={'WWW-Authenticate': 'Bearer'},
     )
+    GOOGLE_TOKENS_URL = 'https://oauth2.googleapis.com/token'
 
     @staticmethod
     def _extract_user_id(payload: dict) -> int | None:
@@ -74,7 +79,6 @@ class AuthService:
         user = UserService.get_user_by_id(db, user_id=user_id)
         return user
 
-
     @classmethod
     async def get_current_user(cls, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
         """ Gets the current user from the access token or raises an exception """
@@ -92,3 +96,43 @@ class AuthService:
             raise cls.CREDENTIALS_EXCEPTION
             
         return user
+
+    @classmethod
+    def verify_google_token(cls, token: str) -> GoogleTokenInfo | None:
+        result: GoogleTokenInfo | None
+
+        try:
+            token_info = id_token.verify_oauth2_token(
+                token,
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID
+            )
+        except ValueError:
+            # Invalid token
+            result = None
+        else:
+            result = dict(token_info)
+
+        return result
+
+    @classmethod
+    def exchange_google_code(cls, code: str) -> GoogleTokenInfo | None:
+        """ Exchanges google auth code for tokens and returns user info """
+        data = {
+            'code': code,
+            'client_id': settings.GOOGLE_CLIENT_ID,
+            'client_secret': settings.GOOGLE_CLIENT_SECRET,
+            'redirect_uri': 'postmessage',
+            'grant_type': 'authorization_code',
+        }
+
+        response = requests.post(cls.GOOGLE_TOKENS_URL, data=data)
+        if response.status_code != 200:
+            return None
+
+        tokens = response.json()
+        id_token_str = tokens.get('id_token')
+        if not id_token_str:
+            return None
+
+        return cls.verify_google_token(id_token_str)

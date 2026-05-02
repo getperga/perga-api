@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import TypedDict
 
 
 class TokenSchema(BaseModel):
@@ -14,3 +15,13 @@ class SigninSchema(BaseModel):
 
 class RefreshTokenSchema(BaseModel):
     refresh_token: str
+
+
+class GoogleSigninSchema(BaseModel):
+    code: str
+
+
+# only used for google signin attributes
+class GoogleTokenInfo(TypedDict, total=False):
+    sub: str
+    email: str

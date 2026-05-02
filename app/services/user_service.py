@@ -1,3 +1,5 @@
+import secrets
+import string
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -20,6 +22,10 @@ class UserService(BaseService[User]):
     @classmethod
     def get_user_by_id(cls, db: Session, user_id: int) -> User | None:
         return cls.get_base_query(db).filter(User.id == user_id).first()
+
+    @classmethod
+    def get_user_by_google_id(cls, db: Session, google_id: str) -> User | None:
+        return cls.get_base_query(db).filter(User.google_id == google_id).first()
 
     @classmethod
     def create_user(cls, db: Session, create_data: UserCreateSchema) -> User:
@@ -75,3 +81,34 @@ class UserService(BaseService[User]):
 
         db.refresh(user)
         return user
+
+    @classmethod
+    def get_or_create_google_user(cls, db: Session, google_id: str, email: str) -> User:
+        # try to get user by google_id
+        user = cls.get_user_by_google_id(db, google_id)
+        if user:
+            return user
+
+        # try to get user by email
+        user = cls.get_user_by_email(db, email)
+        if user:
+            user.google_id = google_id  # link existing user with google_id
+            db.commit()
+            db.refresh(user)
+            return user
+
+        # create new user with google_id and random password
+        random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+        hashed_password = generate_password_hash(random_password)
+        db_user = User(
+            email=email,
+            username=email,
+            google_id=google_id,
+            hashed_password=hashed_password,
+            is_active=True
+        )
+        db.add(db_user)
+        db.commit()
+
+        db.refresh(db_user)
+        return db_user

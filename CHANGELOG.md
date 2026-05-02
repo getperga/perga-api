@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.6] - 2026-05-02
+
+### Added
+
+- Google OAuth2 support
+
 ## [1.1.5] - 2026-04-15
 
 ### Fixed
