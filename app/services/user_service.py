@@ -1,3 +1,5 @@
+import secrets
+import string
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -95,11 +97,14 @@ class UserService(BaseService[User]):
             db.refresh(user)
             return user
 
-        # create new user
+        # create new user with google_id and random password
+        random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+        hashed_password = generate_password_hash(random_password)
         db_user = User(
             email=email,
             username=email,
             google_id=google_id,
+            hashed_password=hashed_password,
             is_active=True
         )
         db.add(db_user)

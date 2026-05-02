@@ -15,7 +15,7 @@ class User(BaseModel):
 
     username = Column(String(length=64), unique=True, index=True, nullable=False)
     email = Column(String(length=64), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(length=128), nullable=True)  # nullable in case of external auth
+    hashed_password = Column(String(length=128), nullable=False)
     is_active = Column(Boolean, default=True, server_default=true(), nullable=False)
 
     # external auth

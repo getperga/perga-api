@@ -36,7 +36,7 @@ class TestGoogleAuth:
         
         assert user.google_id == google_id
         assert user.email == email
-        assert user.hashed_password is None
+        assert user.hashed_password is not None
 
     def test_get_or_create_google_user_existing_email(self, test_db, test_user):
         email = test_user.email
