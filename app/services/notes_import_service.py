@@ -16,16 +16,17 @@ from app.services.notes_folders_service import NotesFolderService
 
 class NotesImportService:
     @classmethod
-    def _parse_html(cls, content: str) -> tuple[str, str]:
+    def _parse_html(cls, content: str, default_title: str) -> tuple[str, str]:
         soup = BeautifulSoup(content, 'html.parser')
         
         # try to find a title
-        title = ''
         if soup.title and soup.title.string:
             title = soup.title.string.strip()
         elif first_h1 := soup.find('h1'):
             title = first_h1.get_text().strip()
             first_h1.decompose() # remove the first title tag from the body to avoid duplication
+        else:
+            title = default_title or 'Untitled Note'
 
         # get body content as a string with HTML
         if soup.body:
@@ -34,12 +35,12 @@ class NotesImportService:
             contents = soup.contents
         body = ''.join(str(tag) for tag in contents)
 
-        return title or 'Untitled Note', body
+        return title, body
 
     @classmethod
-    def _parse_markdown(cls, content: str) -> tuple[str, str]:
+    def _parse_markdown(cls, content: str, default_title: str) -> tuple[str, str]:
         lines = content.splitlines()
-        title = 'Untitled Note'
+        title = None
         body_start_index = 0
         
         for index, line in enumerate(lines):
@@ -47,6 +48,9 @@ class NotesImportService:
                 title = line[2:].strip()
                 body_start_index = index + 1
                 break
+
+        if not title:
+            title = default_title or 'Untitled Note'
         
         body_md = '\n'.join(lines[body_start_index:]).strip()
         body_html = markdown.markdown(body_md)
@@ -56,8 +60,8 @@ class NotesImportService:
         return title, body_html
 
     @classmethod
-    def _parse_txt(cls, content: str, filename: str) -> tuple[str, str]:
-        title = os.path.splitext(filename)[0]
+    def _parse_txt(cls, content: str, default_title: str) -> tuple[str, str]:
+        title = default_title
         body_html = f'<p>{html.escape(content)}</p>'
         return title, body_html
 
@@ -66,8 +70,9 @@ class NotesImportService:
         cls, db: Session, user_id: int, filename: str, content: bytes, folder_id: int
     ) -> Note | None:
         """ Import a single file as a note. """
+        default_title = os.path.splitext(filename)[0]
         extension = os.path.splitext(filename)[1].lower()
-        
+
         try:
             text_content = content.decode('utf-8')
         except UnicodeDecodeError:
@@ -76,11 +81,11 @@ class NotesImportService:
 
         # parse file content and get the body as HTML
         if extension == '.md':
-            title, body = cls._parse_markdown(text_content)
+            title, body = cls._parse_markdown(text_content, default_title)
         elif extension in ('.html', '.htm'):
-            title, body = cls._parse_html(text_content)
+            title, body = cls._parse_html(text_content, default_title)
         elif extension == '.txt':
-            title, body = cls._parse_txt(text_content, filename)
+            title, body = cls._parse_txt(text_content, default_title)
         else:
             return None
 

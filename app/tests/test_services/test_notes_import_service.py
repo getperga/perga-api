@@ -8,39 +8,39 @@ from app.services.notes_import_service import NotesImportService
 
 class TestNotesImportService:
     def test_parse_txt(self):
-        title, body = NotesImportService._parse_txt('Hello World', 'test.txt')
+        title, body = NotesImportService._parse_txt('Hello World', 'test')
         assert title == 'test'
         assert body == '<p>Hello World</p>'
 
     def test_parse_markdown(self):
         content = '# My Title\n\nThis is a test note.'
-        title, body = NotesImportService._parse_markdown(content)
+        title, body = NotesImportService._parse_markdown(content, 'test')
         assert title == 'My Title'
         assert body == '<p>This is a test note.</p>'
 
     def test_parse_markdown_no_h1(self):
         content = 'This is a test note without H1.'
-        title, body = NotesImportService._parse_markdown(content)
+        title, body = NotesImportService._parse_markdown(content, '')
         assert title == 'Untitled Note'
         assert body == '<p>This is a test note without H1.</p>'
 
     def test_parse_html_with_title(self):
         content = '<html><head><title>Page Title</title></head><body><h1>H1 Title</h1><p>Content</p></body></html>'
-        title, body = NotesImportService._parse_html(content)
+        title, body = NotesImportService._parse_html(content, 'test')
         assert title == 'Page Title'
         assert '<h1>H1 Title</h1>' in body
         assert '<p>Content</p>' in body
 
     def test_parse_html_no_title_with_h1(self):
         content = '<html><body><h1>H1 Only</h1><p>Content</p></body></html>'
-        title, body = NotesImportService._parse_html(content)
+        title, body = NotesImportService._parse_html(content, 'test')
         assert title == 'H1 Only'
         assert '<h1>H1 Only</h1>' not in body
         assert '<p>Content</p>' in body
 
     def test_parse_html_with_title_and_h1(self):
         content = '<html><head><title>Page Title</title></head><body><h1>H1 Title</h1><p>Content</p></body></html>'
-        title, body = NotesImportService._parse_html(content)
+        title, body = NotesImportService._parse_html(content, 'test')
         assert title == 'Page Title'
         assert '<h1>H1 Title</h1>' in body
         assert '<p>Content</p>' in body
