@@ -97,7 +97,7 @@ class TestNoteSanitization:
         note = NoteService.create_note(test_db, user_id=test_user.id, create_data=create)
 
         assert '<ul data-type="taskList">' in note.body
-        assert '<li data-type="taskItem">' in note.body
-        assert 'data-checked="true"' not in note.body
+        assert '<li data-type="taskItem"' in note.body
+        assert 'data-checked="true"' in note.body
         assert 'data-type="normalList"' not in note.body
         assert '<ul><li>Normal</li></ul>' in note.body

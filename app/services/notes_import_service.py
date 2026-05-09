@@ -40,6 +40,32 @@ class NotesImportService:
         return title, body
 
     @classmethod
+    def _post_process_markdown_task_lists(cls, body_html: str):
+        """ Post-process task lists from Markdown for TipTap compatibility """
+        if 'task-list' not in body_html:
+            return body_html
+
+        soup = BeautifulSoup(body_html, 'html.parser')
+        for ul in soup.find_all('ul', class_='task-list'):
+            ul['data-type'] = 'taskList'
+            # remove class to keep it clean
+            del ul['class']
+
+            for li in ul.find_all('li', class_='task-list-item'):
+                li['data-type'] = 'taskItem'
+                # find checkbox
+                checkbox = li.find('input', type='checkbox')
+                if checkbox:
+                    li['data-checked'] = 'true' if checkbox.has_attr('checked') else 'false'
+                    checkbox.decompose()
+
+                # remove class
+                del li['class']
+        body_html = str(soup)
+
+        return body_html
+
+    @classmethod
     def _parse_markdown(cls, content: str, default_title: str) -> tuple[str, str]:
         lines = content.splitlines()
         title = None
@@ -55,10 +81,28 @@ class NotesImportService:
             title = default_title or 'Untitled Note'
         
         body_md = '\n'.join(lines[body_start_index:]).strip()
-        body_html = markdown.markdown(body_md)
-        # to avoid losing line breaks, replace \n with empty paragraph tags
-        # but not in between of lists
+        body_html = markdown.markdown(
+            body_md,
+            extensions=[
+                'nl2br',  # converts newlines to <br> tags
+                'sane_lists',  # handles ul and ol lists
+                'tables',
+                'fenced_code',  # handles ```code_blocks```
+                'pymdownx.tasklist',  # handles [x] task list
+                'pymdownx.tilde',  # handles ~~strikethrough~~
+            ],
+            extension_configs={
+                'pymdownx.tilde': {
+                    'subscript': False,
+                }
+            }
+        )
+
+        body_html = cls._post_process_markdown_task_lists(body_html)
+
+        # to avoid losing line breaks, replace \n with empty paragraph tags but not in between of lists
         body_html = re.sub(r'\n(?=<(?!li|/ul|/ol))', '<p></p>', body_html)
+
         return title, body_html
 
     @classmethod
