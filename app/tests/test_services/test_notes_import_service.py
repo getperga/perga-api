@@ -90,3 +90,18 @@ class TestNotesImportService:
         assert subfolder is not None
         assert note3.folder_id == subfolder.id
         assert subfolder.parent_id == folder1.id
+
+    def test_import_zip_non_ascii(self, test_db: Session, test_user):
+        name_utf8 = "Папка"
+        
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
+            zip_file.writestr(name_utf8 + "/note.txt", 'Content')
+
+        zip_content = zip_buffer.getvalue()
+        
+        root_folder = NotesFolderService.get_root_folder(test_db, test_user.id)
+        NotesImportService.import_zip(test_db, test_user.id, zip_content, root_folder.id)
+        
+        folder = NotesFolderService.get_base_query(test_db).filter_by(name=name_utf8, user_id=test_user.id).first()
+        assert folder is not None, f"Folder with name '{name_utf8}' should exist"

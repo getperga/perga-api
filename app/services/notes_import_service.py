@@ -15,6 +15,8 @@ from app.services.notes_folders_service import NotesFolderService
 
 
 class NotesImportService:
+    IGNORE_FOLDER_NAMES = ('__macosx', '.ds_store', 'thumbs.db', 'desktop.ini')
+
     @classmethod
     def _parse_html(cls, content: str, default_title: str) -> tuple[str, str]:
         soup = BeautifulSoup(content, 'html.parser')
@@ -96,10 +98,41 @@ class NotesImportService:
         )
 
     @classmethod
+    def _is_special_path(cls, path: str) -> bool:
+        """ Check if the path should be ignored (special folders/files). """
+        result = False
+
+        parts = path.lower().replace('\\', '/').split('/')
+        for part in parts:
+            if part in cls.IGNORE_FOLDER_NAMES or part.startswith('._'):
+                result = True
+
+        return result
+
+    @classmethod
+    def _check_zipped_filename(cls, filename: str, file_info: zipfile.ZipInfo):
+        """
+        Handles potential issues with zipped filenames in different OS.
+        1. Checks utf-8 bit
+        2. If bit is set, returns the original filename
+        3. If bit is not set, tries to re-encode the filename to CP437 and decode it as utf-8
+        4. Returns the original filename if re-decoding fails. Some systems like macOS might use urf-8 names
+           but not set the flag, so re-decoding fails.
+        """
+        if file_info.flag_bits & 0x800:
+            return filename
+
+        try:
+            filename = filename.encode('cp437').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+
+        return filename
+
+    @classmethod
     def import_zip(
         cls, db: Session, user_id: int, zip_content: bytes, folder_id: int
     ) -> list[Note]:
-        """ Import a ZIP archive, preserving folder structure. """
         imported_notes = []
 
         zip_buffer = io.BytesIO(zip_content)
@@ -108,8 +141,14 @@ class NotesImportService:
             created_folders_map = {'': folder_id}
             
             for file_info in zip_ref.infolist():
+                filename = cls._check_zipped_filename(file_info.filename, file_info)
+
+                # skip special folders and files
+                if cls._is_special_path(filename):
+                    continue
+
                 if file_info.is_dir():
-                    path_parts = [part for part in file_info.filename.strip('/').split('/') if part]
+                    path_parts = [part for part in filename.strip('/').split('/') if part]
                     current_path = ''
                     current_parent_id = folder_id
                     
@@ -128,7 +167,6 @@ class NotesImportService:
                     continue
                 
                 # Handle file entry
-                filename = file_info.filename
                 path_parts = filename.split('/')
                 
                 if len(path_parts) > 1:
