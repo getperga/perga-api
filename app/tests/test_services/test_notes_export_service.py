@@ -25,10 +25,12 @@ class TestNotesExportService:
     def test_generate_export_filename(self, test_db: Session, test_user):
         note = Note(id=1, title='My Note!', body='', user_id=test_user.id)
         filename = NotesExportService._generate_export_filename(note, ExportType.HTML)
+        # '!' is stripped by WHITELIST_FILENAME_CHARS_RE
         assert filename == 'My Note.html'
 
-        note_no_title = Note(id=2, title='!!!', body='', user_id=test_user.id)
+        note_no_title = Note(id=2, title='!:!:!', body='', user_id=test_user.id)
         filename = NotesExportService._generate_export_filename(note_no_title, ExportType.MARKDOWN)
+        # '!!!' becomes empty, then falls back to note_{id}
         assert filename == 'note_2.md'
 
     def test_export_single_note(self, test_db: Session, test_user):

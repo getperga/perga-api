@@ -31,10 +31,11 @@ def notes_export(
         if not content:
             raise HTTPException(status_code=404, detail='Note not found')
 
+        headers = NotesExportService.generate_export_headers(filename)
         return Response(
             content=content,
             media_type=media_type,
-            headers={'Content-Disposition': f'attachment; filename={filename}'}
+            headers=headers
         )
     elif export_target == ExportTarget.FOLDER_NOTES and export_target_id:
         zip_buffer, filename = NotesExportService.export_folder(
@@ -52,8 +53,9 @@ def notes_export(
     else:
         raise HTTPException(status_code=400, detail='Invalid request')
 
+    headers = NotesExportService.generate_export_headers(filename)
     return StreamingResponse(
         zip_buffer,
         media_type='application/x-zip-compressed',
-        headers={'Content-Disposition': f'attachment; filename={filename}'}
+        headers=headers
     )

@@ -1,4 +1,7 @@
 import io
+import re
+import unicodedata
+import urllib.parse
 import zipfile
 from markdownify import markdownify
 from weasyprint import HTML
@@ -11,6 +14,13 @@ from app.services.notes_folders_service import NotesFolderService
 
 
 class NotesExportService:
+    WINDOWS_RESERVED_FILENAMES = {
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+    }
+    WHITELIST_FILENAME_CHARS_RE = re.compile(r'[^A-Za-z0-9._()\- \u0400-\u04FF]')
+
     @classmethod
     def _generate_pdf_content(cls, note: Note) -> bytes:
         """ Generate PDF content from note body HTML. """
@@ -49,14 +59,40 @@ class NotesExportService:
     def _generate_export_filename(cls, note: Note, export_type: ExportType) -> str:
         extension = EXPORT_TYPE_EXTENSION_MAP[export_type]
 
-        # sanitiza filename
-        safe_title = ''.join(
-            [char for char in note.title if char.isalnum() or char in (' ', '.', '_')]
-        ).rstrip()
-        if not safe_title:
-            safe_title = f'note_{note.id}'
+        # collapse compatibility chars and combine decomposed sequences
+        title = unicodedata.normalize('NFKC', note.title)
 
-        return f'{safe_title}.{extension}'
+        # remove Unicode control and non-printable characters
+        title = ''.join(
+            title_char for title_char in title
+            if not unicodedata.category(title_char).startswith('C')
+        )
+
+        # remove non-whitelisted characters
+        title = cls.WHITELIST_FILENAME_CHARS_RE.sub('', title)
+
+        # remove leading and trailing spaces and periods
+        title = title.strip()
+        title = title.lstrip('.')
+        title = title.rstrip(' .')
+
+        # fallback
+        if not title or title.upper() in cls.WINDOWS_RESERVED_FILENAMES:
+            title = f'note_{note.id}'
+
+        # truncate utf-8 string (non-ASCII chars take 2-4 bytes in utf-8)
+        encoded = title.encode('utf-8')
+        if len(encoded) > 200:
+            title = encoded[:200].decode('utf-8', errors='ignore').strip()
+
+        return f'{title}.{extension}'
+
+    @classmethod
+    def generate_export_headers(cls, filename: str) -> dict:
+        encoded_filename = urllib.parse.quote(filename)
+        return {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
 
     @classmethod
     def _create_zip_archive(cls, items: list[Note | tuple[Note, str]], export_type: ExportType) -> io.BytesIO:
