@@ -22,7 +22,7 @@ class NotesExportService:
     WHITELIST_FILENAME_CHARS_RE = re.compile(r'[^A-Za-z0-9._()\- \u0400-\u04FF]')
 
     @classmethod
-    def _generate_pdf_content(cls, note: Note) -> bytes:
+    def _generate_pdf_content(cls, title: str, body: str) -> bytes:
         """ Generate PDF content from note body HTML. """
         html_content = f"""
             <html>
@@ -34,25 +34,60 @@ class NotesExportService:
                 </style>
             </head>
             <body>
-                <h1>{note.title}</h1>
-                {note.body}
+                <h1>{title}</h1>
+                {body}
             </body>
             </html>
         """
         return HTML(string=html_content).write_pdf()
 
     @classmethod
+    def _preprocess_tiptap_task_lists(cls, body: str) -> str:
+        """ Converts Tiptap specific task lists to markdown-compatible format """
+        if 'data-type="taskList"' not in body:
+            return body
+
+        # replace checked items
+        body = re.sub(
+            r'<li\s+[^>]*data-type="taskItem"[^>]*data-checked="true"[^>]*>',
+            r'<li>[x] ',
+            body
+        )
+        body = re.sub(
+            r'<li\s+[^>]*data-checked="true"[^>]*data-type="taskItem"[^>]*>',
+            r'<li>[x] ',
+            body
+        )
+
+        # replace unchecked items
+        body = re.sub(
+            r'<li\s+[^>]*data-type="taskItem"[^>]*data-checked="false"[^>]*>',
+            r'<li>[ ] ',
+            body
+        )
+        body = re.sub(
+            r'<li\s+[^>]*data-checked="false"[^>]*data-type="taskItem"[^>]*>',
+            r'<li>[ ] ',
+            body
+        )
+
+        return body
+
+    @classmethod
     def _get_note_content(cls, note: Note, export_type: ExportType) -> str | bytes:
         """ Notes body stored as HTML. Converts it to a specified format if needed and adds a title. """
+        body = cls._preprocess_tiptap_task_lists(note.body)
+
         note_content: str | bytes
         if export_type == ExportType.MARKDOWN:
             title = f"# {note.title}\n\n"
-            note_content = title + markdownify(note.body)
+            note_content = title + markdownify(body)
         elif export_type == ExportType.PDF:
-            note_content = cls._generate_pdf_content(note)
+            note_content = cls._generate_pdf_content(note.title, body)
         else:
             title = f"<h1>{note.title}</h1>"
-            note_content = title + note.body
+            note_content = title + body
+
         return note_content
 
     @classmethod

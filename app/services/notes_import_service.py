@@ -40,7 +40,7 @@ class NotesImportService:
         return title, body
 
     @classmethod
-    def _post_process_markdown_task_lists(cls, body_html: str):
+    def _post_process_task_lists(cls, body_html: str):
         """ Post-process task lists from Markdown for TipTap compatibility """
         if 'task-list' not in body_html:
             return body_html
@@ -98,7 +98,7 @@ class NotesImportService:
             }
         )
 
-        body_html = cls._post_process_markdown_task_lists(body_html)
+        body_html = cls._post_process_task_lists(body_html)
 
         # to avoid losing line breaks, replace \n with empty paragraph tags but not in between of lists
         body_html = re.sub(r'\n(?=<(?!li|/ul|/ol))', '<p></p>', body_html)
