@@ -15,17 +15,20 @@ from app.services.notes_folders_service import NotesFolderService
 
 
 class NotesImportService:
+    IGNORE_FOLDER_NAMES = ('__macosx', '.ds_store', 'thumbs.db', 'desktop.ini')
+
     @classmethod
-    def _parse_html(cls, content: str) -> tuple[str, str]:
+    def _parse_html(cls, content: str, default_title: str) -> tuple[str, str]:
         soup = BeautifulSoup(content, 'html.parser')
         
         # try to find a title
-        title = ''
         if soup.title and soup.title.string:
             title = soup.title.string.strip()
         elif first_h1 := soup.find('h1'):
             title = first_h1.get_text().strip()
             first_h1.decompose() # remove the first title tag from the body to avoid duplication
+        else:
+            title = default_title or 'Untitled Note'
 
         # get body content as a string with HTML
         if soup.body:
@@ -34,12 +37,38 @@ class NotesImportService:
             contents = soup.contents
         body = ''.join(str(tag) for tag in contents)
 
-        return title or 'Untitled Note', body
+        return title, body
 
     @classmethod
-    def _parse_markdown(cls, content: str) -> tuple[str, str]:
+    def _post_process_task_lists(cls, body_html: str):
+        """ Post-process task lists from Markdown for TipTap compatibility """
+        if 'task-list' not in body_html:
+            return body_html
+
+        soup = BeautifulSoup(body_html, 'html.parser')
+        for ul in soup.find_all('ul', class_='task-list'):
+            ul['data-type'] = 'taskList'
+            # remove class to keep it clean
+            del ul['class']
+
+            for li in ul.find_all('li', class_='task-list-item'):
+                li['data-type'] = 'taskItem'
+                # find checkbox
+                checkbox = li.find('input', type='checkbox')
+                if checkbox:
+                    li['data-checked'] = 'true' if checkbox.has_attr('checked') else 'false'
+                    checkbox.decompose()
+
+                # remove class
+                del li['class']
+        body_html = str(soup)
+
+        return body_html
+
+    @classmethod
+    def _parse_markdown(cls, content: str, default_title: str) -> tuple[str, str]:
         lines = content.splitlines()
-        title = 'Untitled Note'
+        title = None
         body_start_index = 0
         
         for index, line in enumerate(lines):
@@ -47,17 +76,38 @@ class NotesImportService:
                 title = line[2:].strip()
                 body_start_index = index + 1
                 break
+
+        if not title:
+            title = default_title or 'Untitled Note'
         
         body_md = '\n'.join(lines[body_start_index:]).strip()
-        body_html = markdown.markdown(body_md)
-        # to avoid losing line breaks, replace \n with empty paragraph tags
-        # but not in between of lists
+        body_html = markdown.markdown(
+            body_md,
+            extensions=[
+                'nl2br',  # converts newlines to <br> tags
+                'sane_lists',  # handles ul and ol lists
+                'tables',
+                'fenced_code',  # handles ```code_blocks```
+                'pymdownx.tasklist',  # handles [x] task list
+                'pymdownx.tilde',  # handles ~~strikethrough~~
+            ],
+            extension_configs={
+                'pymdownx.tilde': {
+                    'subscript': False,
+                }
+            }
+        )
+
+        body_html = cls._post_process_task_lists(body_html)
+
+        # to avoid losing line breaks, replace \n with empty paragraph tags but not in between of lists
         body_html = re.sub(r'\n(?=<(?!li|/ul|/ol))', '<p></p>', body_html)
+
         return title, body_html
 
     @classmethod
-    def _parse_txt(cls, content: str, filename: str) -> tuple[str, str]:
-        title = os.path.splitext(filename)[0]
+    def _parse_txt(cls, content: str, default_title: str) -> tuple[str, str]:
+        title = default_title
         body_html = f'<p>{html.escape(content)}</p>'
         return title, body_html
 
@@ -66,8 +116,9 @@ class NotesImportService:
         cls, db: Session, user_id: int, filename: str, content: bytes, folder_id: int
     ) -> Note | None:
         """ Import a single file as a note. """
+        default_title = os.path.splitext(filename)[0]
         extension = os.path.splitext(filename)[1].lower()
-        
+
         try:
             text_content = content.decode('utf-8')
         except UnicodeDecodeError:
@@ -76,11 +127,11 @@ class NotesImportService:
 
         # parse file content and get the body as HTML
         if extension == '.md':
-            title, body = cls._parse_markdown(text_content)
+            title, body = cls._parse_markdown(text_content, default_title)
         elif extension in ('.html', '.htm'):
-            title, body = cls._parse_html(text_content)
+            title, body = cls._parse_html(text_content, default_title)
         elif extension == '.txt':
-            title, body = cls._parse_txt(text_content, filename)
+            title, body = cls._parse_txt(text_content, default_title)
         else:
             return None
 
@@ -91,10 +142,41 @@ class NotesImportService:
         )
 
     @classmethod
+    def _is_special_path(cls, path: str) -> bool:
+        """ Check if the path should be ignored (special folders/files). """
+        result = False
+
+        parts = path.lower().replace('\\', '/').split('/')
+        for part in parts:
+            if part in cls.IGNORE_FOLDER_NAMES or part.startswith('._'):
+                result = True
+
+        return result
+
+    @classmethod
+    def _check_zipped_filename(cls, filename: str, file_info: zipfile.ZipInfo):
+        """
+        Handles potential issues with zipped filenames in different OS.
+        1. Checks utf-8 bit
+        2. If bit is set, returns the original filename
+        3. If bit is not set, tries to re-encode the filename to CP437 and decode it as utf-8
+        4. Returns the original filename if re-decoding fails. Some systems like macOS might use urf-8 names
+           but not set the flag, so re-decoding fails.
+        """
+        if file_info.flag_bits & 0x800:
+            return filename
+
+        try:
+            filename = filename.encode('cp437').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+
+        return filename
+
+    @classmethod
     def import_zip(
         cls, db: Session, user_id: int, zip_content: bytes, folder_id: int
     ) -> list[Note]:
-        """ Import a ZIP archive, preserving folder structure. """
         imported_notes = []
 
         zip_buffer = io.BytesIO(zip_content)
@@ -103,8 +185,14 @@ class NotesImportService:
             created_folders_map = {'': folder_id}
             
             for file_info in zip_ref.infolist():
+                filename = cls._check_zipped_filename(file_info.filename, file_info)
+
+                # skip special folders and files
+                if cls._is_special_path(filename):
+                    continue
+
                 if file_info.is_dir():
-                    path_parts = [part for part in file_info.filename.strip('/').split('/') if part]
+                    path_parts = [part for part in filename.strip('/').split('/') if part]
                     current_path = ''
                     current_parent_id = folder_id
                     
@@ -123,7 +211,6 @@ class NotesImportService:
                     continue
                 
                 # Handle file entry
-                filename = file_info.filename
                 path_parts = filename.split('/')
                 
                 if len(path_parts) > 1:

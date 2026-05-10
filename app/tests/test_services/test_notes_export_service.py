@@ -25,10 +25,12 @@ class TestNotesExportService:
     def test_generate_export_filename(self, test_db: Session, test_user):
         note = Note(id=1, title='My Note!', body='', user_id=test_user.id)
         filename = NotesExportService._generate_export_filename(note, ExportType.HTML)
+        # '!' is stripped by WHITELIST_FILENAME_CHARS_RE
         assert filename == 'My Note.html'
 
-        note_no_title = Note(id=2, title='!!!', body='', user_id=test_user.id)
+        note_no_title = Note(id=2, title='!:!:!', body='', user_id=test_user.id)
         filename = NotesExportService._generate_export_filename(note_no_title, ExportType.MARKDOWN)
+        # '!!!' becomes empty, then falls back to note_{id}
         assert filename == 'note_2.md'
 
     def test_export_single_note(self, test_db: Session, test_user):
@@ -194,3 +196,18 @@ class TestNotesExportService:
         assert isinstance(content, bytes)
         assert content.startswith(b'%PDF')
         assert filename == 'Test PDF.pdf'
+
+    def test_get_note_content_tiptap_task_list(self, test_db: Session, test_user):
+        tiptap_html = (
+            '<ul data-type="taskList">'
+            '<li data-checked="true" data-type="taskItem"><p><s>Done task</s></p></li>'
+            '<li data-checked="false" data-type="taskItem"><p>Todo task</p></li>'
+            '</ul>'
+        )
+        note = Note(title='Tiptap', body=tiptap_html, user_id=test_user.id)
+        content = NotesExportService._get_note_content(note, ExportType.MARKDOWN)
+        
+        assert '[x]' in content
+        assert '[ ]' in content
+        assert 'Done task' in content
+        assert 'Todo task' in content

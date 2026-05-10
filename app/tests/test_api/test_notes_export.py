@@ -1,4 +1,5 @@
 import io
+import urllib.parse
 import zipfile
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -39,7 +40,8 @@ class TestNotesExportAPI:
 
         assert response.status_code == 200
         assert 'text/html' in response.headers['content-type']
-        assert f'attachment; filename={self.TEST_NOTE_TITLE}.html' in response.headers['content-disposition']
+        expected_filename = urllib.parse.quote(self.TEST_NOTE_TITLE)
+        assert f"attachment; filename*=UTF-8''{expected_filename}.html" in response.headers['content-disposition']
         assert response.text == f'<h1>{self.TEST_NOTE_TITLE}</h1>{self.TEST_NOTE_BODY}'
 
     def test_export_single_note_markdown(self, client: TestClient, test_db: Session, test_user, auth_headers):
@@ -66,7 +68,8 @@ class TestNotesExportAPI:
         
         assert response.status_code == 200
         assert 'text/markdown' in response.headers['content-type']
-        assert f'attachment; filename={self.TEST_NOTE_TITLE}.md' in response.headers['content-disposition']
+        expected_filename = urllib.parse.quote(self.TEST_NOTE_TITLE)
+        assert f"attachment; filename*=UTF-8''{expected_filename}.md" in response.headers['content-disposition']
         # markdownify of <h2>Hello</h2><p>World</p> should be something like 'Hello\n=====\n\nWorld\n\n'
         assert 'Hello' in response.text
         assert 'World' in response.text
@@ -102,7 +105,8 @@ class TestNotesExportAPI:
         
         assert response.status_code == 200
         assert response.headers['content-type'] == 'application/x-zip-compressed'
-        assert f'attachment; filename=notes_folder_{folder.name}.zip' in response.headers['content-disposition']
+        expected_zip_name = urllib.parse.quote(f'notes_folder_{folder.name}.zip')
+        assert f"attachment; filename*=UTF-8''{expected_zip_name}" in response.headers['content-disposition']
         
         # Verify ZIP content
         zip_content = io.BytesIO(response.content)
@@ -142,7 +146,7 @@ class TestNotesExportAPI:
         )
         
         assert response.status_code == 200
-        assert 'attachment; filename=all_notes.zip' in response.headers['content-disposition']
+        assert "attachment; filename*=UTF-8''all_notes.zip" in response.headers['content-disposition']
         
         zip_content = io.BytesIO(response.content)
         with zipfile.ZipFile(zip_content) as zf:
@@ -187,7 +191,8 @@ class TestNotesExportAPI:
         
         assert response.status_code == 200
         assert 'application/pdf' in response.headers['content-type']
-        assert f'attachment; filename={note.title}.pdf' in response.headers['content-disposition']
+        expected_filename = urllib.parse.quote(note.title)
+        assert f"attachment; filename*=UTF-8''{expected_filename}.pdf" in response.headers['content-disposition']
         assert response.content.startswith(b'%PDF')
 
     def test_export_folder_zip_recursive(self, client: TestClient, test_db: Session, test_user, auth_headers):
@@ -255,7 +260,8 @@ class TestNotesExportAPI:
         )
         
         assert response.status_code == 200
-        assert response.headers['content-type'] == 'application/x-zip-compressed'
+        expected_zip_name = urllib.parse.quote(f'notes_folder_{folder.name}.zip')
+        assert f"attachment; filename*=UTF-8''{expected_zip_name}" in response.headers['content-disposition']
         
         # Verify ZIP content
         zip_content = io.BytesIO(response.content)
@@ -264,3 +270,31 @@ class TestNotesExportAPI:
             note_filename = f'{note.title}.pdf'
             assert note_filename in filenames
             assert zf.read(note_filename).startswith(b'%PDF')
+
+    def test_export_single_note_non_ascii_filename(self, client: TestClient, test_db: Session, test_user, auth_headers):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+        title = 'Привет мир'
+        note = NoteService.create_note(
+            test_db,
+            user_id=test_user.id,
+            create_data=NoteCreateSchema(
+                title=title,
+                body='Содержимое',
+                folder_id=root_folder.id
+            )
+        )
+        
+        response = client.get(
+            f'{settings.API_V1_STR}/notes/export/',
+            params={
+                'export_type': ExportType.HTML.value,
+                'export_target': ExportTarget.SINGLE_NOTE.value,
+                'export_target_id': note.id,
+            },
+            headers=auth_headers
+        )
+        
+        assert response.status_code == 200
+        # The filename in Content-Disposition should be encoded or present in filename*
+        content_disp = response.headers['content-disposition']
+        assert 'filename*=UTF-8\'\'%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82%20%D0%BC%D0%B8%D1%80.html' in content_disp

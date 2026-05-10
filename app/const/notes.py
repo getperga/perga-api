@@ -39,7 +39,7 @@ IMPORT_SIZE_LIMIT = IMPORT_SIZE_LIMIT_MB * 1024 * 1024
 NOTE_BODY_ALLOWED_TAGS = {
     'p', 'br',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'strong', 'b', 'em', 'i', 'u', 's',
+    'strong', 'b', 'em', 'i', 'u', 's', 'del',
     'sub', 'sup',
     'ul', 'ol', 'li',
     'blockquote', 'code', 'pre', 'hr',
@@ -52,7 +52,7 @@ NOTE_BODY_ALLOWED_ATTRIBUTES = {
     'img': {'src', 'alt', 'title', 'width', 'height'},
     'ol': {'start', 'type'},
     'ul': {'data-type'},
-    'li': {'data-type'},
+    'li': {'data-type', 'data-checked'},
     'td': {'colspan', 'rowspan'},
     'th': {'colspan', 'rowspan'},
 }

@@ -6,7 +6,7 @@ from app.schemas.notes_folders import (
     NotesFolderSchema,
     NotesFolderCreateSchema,
     NotesFolderUpdateSchema,
-    GetFolderrsResponseSchema,
+    GetFoldersResponseSchema,
 )
 from app.schemas.user import UserSchema
 from app.services.auth_service import AuthService
@@ -15,7 +15,7 @@ from app.services.notes_folders_service import NotesFolderService
 router = APIRouter()
 
 
-@router.get("/", response_model=GetFolderrsResponseSchema)
+@router.get("/", response_model=GetFoldersResponseSchema)
 def get_folders(
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(AuthService.get_current_user)

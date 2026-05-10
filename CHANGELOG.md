@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.7] - 2026-05-10
+
+### Fixed
+
+- Notes export and import bugs
+
 ## [1.1.6] - 2026-05-02
 
 ### Added

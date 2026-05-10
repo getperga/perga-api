@@ -1,4 +1,7 @@
 import io
+import re
+import unicodedata
+import urllib.parse
 import zipfile
 from markdownify import markdownify
 from weasyprint import HTML
@@ -11,8 +14,15 @@ from app.services.notes_folders_service import NotesFolderService
 
 
 class NotesExportService:
+    WINDOWS_RESERVED_FILENAMES = {
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+    }
+    WHITELIST_FILENAME_CHARS_RE = re.compile(r'[^A-Za-z0-9._()\- \u0400-\u04FF]')
+
     @classmethod
-    def _generate_pdf_content(cls, note: Note) -> bytes:
+    def _generate_pdf_content(cls, title: str, body: str) -> bytes:
         """ Generate PDF content from note body HTML. """
         html_content = f"""
             <html>
@@ -24,39 +34,100 @@ class NotesExportService:
                 </style>
             </head>
             <body>
-                <h1>{note.title}</h1>
-                {note.body}
+                <h1>{title}</h1>
+                {body}
             </body>
             </html>
         """
         return HTML(string=html_content).write_pdf()
 
     @classmethod
+    def _preprocess_tiptap_task_lists(cls, body: str) -> str:
+        """ Converts Tiptap specific task lists to markdown-compatible format """
+        if 'data-type="taskList"' not in body:
+            return body
+
+        # replace checked items
+        body = re.sub(
+            r'<li\s+[^>]*data-type="taskItem"[^>]*data-checked="true"[^>]*>',
+            r'<li>[x] ',
+            body
+        )
+        body = re.sub(
+            r'<li\s+[^>]*data-checked="true"[^>]*data-type="taskItem"[^>]*>',
+            r'<li>[x] ',
+            body
+        )
+
+        # replace unchecked items
+        body = re.sub(
+            r'<li\s+[^>]*data-type="taskItem"[^>]*data-checked="false"[^>]*>',
+            r'<li>[ ] ',
+            body
+        )
+        body = re.sub(
+            r'<li\s+[^>]*data-checked="false"[^>]*data-type="taskItem"[^>]*>',
+            r'<li>[ ] ',
+            body
+        )
+
+        return body
+
+    @classmethod
     def _get_note_content(cls, note: Note, export_type: ExportType) -> str | bytes:
         """ Notes body stored as HTML. Converts it to a specified format if needed and adds a title. """
+        body = cls._preprocess_tiptap_task_lists(note.body)
+
         note_content: str | bytes
         if export_type == ExportType.MARKDOWN:
             title = f"# {note.title}\n\n"
-            note_content = title + markdownify(note.body)
+            note_content = title + markdownify(body)
         elif export_type == ExportType.PDF:
-            note_content = cls._generate_pdf_content(note)
+            note_content = cls._generate_pdf_content(note.title, body)
         else:
             title = f"<h1>{note.title}</h1>"
-            note_content = title + note.body
+            note_content = title + body
+
         return note_content
 
     @classmethod
     def _generate_export_filename(cls, note: Note, export_type: ExportType) -> str:
         extension = EXPORT_TYPE_EXTENSION_MAP[export_type]
 
-        # sanitiza filename
-        safe_title = ''.join(
-            [char for char in note.title if char.isalnum() or char in (' ', '.', '_')]
-        ).rstrip()
-        if not safe_title:
-            safe_title = f'note_{note.id}'
+        # collapse compatibility chars and combine decomposed sequences
+        title = unicodedata.normalize('NFKC', note.title)
 
-        return f'{safe_title}.{extension}'
+        # remove Unicode control and non-printable characters
+        title = ''.join(
+            title_char for title_char in title
+            if not unicodedata.category(title_char).startswith('C')
+        )
+
+        # remove non-whitelisted characters
+        title = cls.WHITELIST_FILENAME_CHARS_RE.sub('', title)
+
+        # remove leading and trailing spaces and periods
+        title = title.strip()
+        title = title.lstrip('.')
+        title = title.rstrip(' .')
+
+        # fallback
+        if not title or title.upper() in cls.WINDOWS_RESERVED_FILENAMES:
+            title = f'note_{note.id}'
+
+        # truncate utf-8 string (non-ASCII chars take 2-4 bytes in utf-8)
+        encoded = title.encode('utf-8')
+        if len(encoded) > 200:
+            title = encoded[:200].decode('utf-8', errors='ignore').strip()
+
+        return f'{title}.{extension}'
+
+    @classmethod
+    def generate_export_headers(cls, filename: str) -> dict:
+        encoded_filename = urllib.parse.quote(filename)
+        return {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
 
     @classmethod
     def _create_zip_archive(cls, items: list[Note | tuple[Note, str]], export_type: ExportType) -> io.BytesIO:
