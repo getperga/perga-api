@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.auth import TokenSchema, SigninSchema, RefreshTokenSchema, GoogleSigninSchema
 from app.schemas.user import UserSchema, UserCreateSchema, UserUpdateSchema, PasswordChangeSchema
@@ -12,6 +13,9 @@ router = APIRouter()
 
 @router.post("/signup/", response_model=UserSchema)
 def signup(request_data: UserCreateSchema, db: Session = Depends(get_db)):
+    if settings.IS_SIGNUP_DISABLED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sign up is disabled")
+
     try:
         user = UserService.create_user(db=db, create_data=request_data)
     except ValueError as e:
@@ -133,6 +137,11 @@ def google_signin(signin_data: GoogleSigninSchema, db: Session = Depends(get_db)
         )
 
     user = UserService.get_or_create_google_user(db=db, google_id=google_id, email=email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='User not found'
+        )
     tokens = AuthService.create_user_tokens(user.id)
 
     return tokens

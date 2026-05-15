@@ -1,4 +1,7 @@
+import pytest
 from unittest.mock import patch
+
+from app.core.config import settings
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 
@@ -57,7 +60,7 @@ class TestGoogleAuth:
         assert existing_user.id == new_user.id
         assert new_user.google_id == google_id
 
-    def test_google_signin_endpoint(self, client, test_db):
+    def test_google_auth_endpoint(self, client, test_db):
         google_id = 'endpoint-google-id'
         email = 'endpoint@example.com'
         
@@ -84,3 +87,34 @@ class TestGoogleAuth:
                 user = UserService.get_user_by_google_id(test_db, google_id)
                 assert user is not None
                 assert user.email == email
+
+    def test_get_or_create_google_user_signup_disabled(self, test_db):
+        with patch.object(settings, 'IS_SIGNUP_DISABLED', True):
+            google_id = 'disabled-google-id'
+            email = 'disabled@example.com'
+            
+            user = UserService.get_or_create_google_user(test_db, google_id, email)
+            assert user is None
+
+    def test_google_auth_endpoint_signup_disabled(self, client, test_db):
+        with patch.object(settings, 'IS_SIGNUP_DISABLED', True):
+            google_id = 'endpoint-disabled-google-id'
+            email = 'endpoint-disabled@example.com'
+            
+            with patch('app.services.auth_service.requests.post') as mock_post:
+                mock_post.return_value.status_code = 200
+                mock_post.return_value.json.return_value = {'id_token': 'fake-id-token'}
+
+                with patch('app.services.auth_service.id_token.verify_oauth2_token') as mock_verify:
+                    mock_verify.return_value = {
+                        'sub': google_id,
+                        'email': email,
+                    }
+                    
+                    response = client.post(
+                        '/api/v1/auth/google/',
+                        json={'code': 'valid-google-code'}
+                    )
+                    
+                    assert response.status_code == 403
+                    assert response.json()['detail'] == 'User not found'
