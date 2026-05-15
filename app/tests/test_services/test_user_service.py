@@ -1,6 +1,8 @@
 import pytest
 from sqlalchemy.orm import Session
+from unittest.mock import patch
 
+from app.core.config import settings
 from app.schemas.user import UserCreateSchema, UserUpdateSchema
 from app.services.auth_utils import validate_password
 from app.services.user_service import UserService
@@ -125,3 +127,14 @@ class TestUserService:
         with pytest.raises(ValueError) as excinfo:
             UserService.change_password(test_db, test_user.id, current_password='wrong', new_password='another')
         assert 'Incorrect current password' in str(excinfo.value)
+
+    def test_create_user_signup_disabled(self, test_db: Session):
+        user_create = UserCreateSchema(
+            username='disableduser',
+            email='disabled@example.com',
+            password='password123'
+        )
+        
+        with patch.object(settings, 'IS_SIGNUP_DISABLED', True):
+            with pytest.raises(ValueError, match="Signup is disabled"):
+                UserService.create_user(test_db, user_create)

@@ -2,6 +2,7 @@ import secrets
 import string
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.user import User
 from app.schemas.user import UserCreateSchema, UserUpdateSchema
 from app.services.base_service import BaseService
@@ -29,12 +30,15 @@ class UserService(BaseService[User]):
 
     @classmethod
     def create_user(cls, db: Session, create_data: UserCreateSchema) -> User:
+        if settings.IS_SIGNUP_DISABLED:
+            raise ValueError('Signup is disabled')
+
         # Check if user with this email or username already exists
         if cls.get_user_by_email(db, create_data.email):
-            raise ValueError("Email already registered")
+            raise ValueError('Email already registered')
 
         if cls.get_user_by_username(db, create_data.username):
-            raise ValueError("Username already taken")
+            raise ValueError('Username already taken')
 
         # Create new user
         hashed_password = generate_password_hash(create_data.password)
@@ -73,7 +77,7 @@ class UserService(BaseService[User]):
         # Verify current password
         if not validate_password(current_password, user.hashed_password):
             # Do not change anything if verification fails
-            raise ValueError("Incorrect current password")
+            raise ValueError('Incorrect current password')
 
         # Update to new password
         user.hashed_password = generate_password_hash(new_password)
@@ -83,7 +87,7 @@ class UserService(BaseService[User]):
         return user
 
     @classmethod
-    def get_or_create_google_user(cls, db: Session, google_id: str, email: str) -> User:
+    def get_or_create_google_user(cls, db: Session, google_id: str, email: str) -> User | None:
         # try to get user by google_id
         user = cls.get_user_by_google_id(db, google_id)
         if user:
@@ -96,6 +100,9 @@ class UserService(BaseService[User]):
             db.commit()
             db.refresh(user)
             return user
+
+        if settings.IS_SIGNUP_DISABLED:
+            return None
 
         # create new user with google_id and random password
         random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
 
+    IS_SIGNUP_DISABLED: bool = False
     ROOT_URL_REDIRECT: str | None = None
 
     @property
