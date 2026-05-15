@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.8] - 2026-05-15
+
+### Added
+
+- IS_SIGNUP_DISABLED env var
+
 ## [1.1.7] - 2026-05-10
 
 ### Fixed
