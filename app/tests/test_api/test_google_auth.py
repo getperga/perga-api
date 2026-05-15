@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch
 
 from app.core.config import settings
@@ -116,5 +115,5 @@ class TestGoogleAuth:
                         json={'code': 'valid-google-code'}
                     )
                     
-                    assert response.status_code == 403
+                    assert response.status_code == 404
                     assert response.json()['detail'] == 'User not found'

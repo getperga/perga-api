@@ -14,7 +14,7 @@ router = APIRouter()
 @router.post("/signup/", response_model=UserSchema)
 def signup(request_data: UserCreateSchema, db: Session = Depends(get_db)):
     if settings.IS_SIGNUP_DISABLED:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sign up is disabled")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Signup is disabled")
 
     try:
         user = UserService.create_user(db=db, create_data=request_data)

@@ -31,7 +31,7 @@ class UserService(BaseService[User]):
     @classmethod
     def create_user(cls, db: Session, create_data: UserCreateSchema) -> User:
         if settings.IS_SIGNUP_DISABLED:
-            raise ValueError('Sign up is disabled')
+            raise ValueError('Signup is disabled')
 
         # Check if user with this email or username already exists
         if cls.get_user_by_email(db, create_data.email):
