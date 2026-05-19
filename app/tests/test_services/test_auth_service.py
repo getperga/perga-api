@@ -1,4 +1,5 @@
 import pytest
+from fastapi import HTTPException
 from jose import jwt
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from app.core.config import settings
 from app.models.user import User
 from app.services.auth_service import AuthService
 from app.services.auth_utils import create_access_token, create_refresh_token, generate_password_hash
+from app.services.user_service import UserService
 from app.tests.const import TEST_USERNAME, TEST_EMAIL, TEST_PASSWORD
 
 
@@ -159,17 +161,79 @@ class TestAuthService:
         assert excinfo.value.status_code == 401
         assert 'Could not validate credentials' in excinfo.value.detail
 
+    def test_authenticate_user_inactive(self, test_db):
+        user = User(
+            username=TEST_USERNAME,
+            email=TEST_EMAIL,
+            hashed_password=generate_password_hash(TEST_PASSWORD),
+            is_active=False,
+        )
+        test_db.add(user)
+        test_db.commit()
+
+        authenticated_user = AuthService.authenticate_user(test_db, user.username, TEST_PASSWORD)
+        assert authenticated_user is None
+
+    def test_validate_refresh_token_inactive(self, test_db):
+        user = User(
+            username=TEST_USERNAME,
+            email=TEST_EMAIL,
+            hashed_password=generate_password_hash(TEST_PASSWORD),
+            is_active=False,
+        )
+        test_db.add(user)
+        test_db.commit()
+
+        refresh_token = create_refresh_token({'sub': user.id})
+        
+        validated_user = AuthService.validate_refresh_token(test_db, refresh_token)
+        assert validated_user is None
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
+    @patch('app.services.auth_service.jwt.decode')
+    async def test_get_current_user_inactive(self, mock_decode, test_db):
+        user = User(
+            username=TEST_USERNAME,
+            email=TEST_EMAIL,
+            hashed_password=generate_password_hash(TEST_PASSWORD),
+            is_active=False,
+        )
+        test_db.add(user)
+        test_db.commit()
+
+        mock_decode.return_value = {'sub': str(user.id)}
+        
+        with pytest.raises(HTTPException) as excinfo:
+            await AuthService.get_current_user('valid_token', test_db)
+        
+        assert excinfo.value.status_code == 401
+        assert 'Could not validate credentials' in excinfo.value.detail
+
     @pytest.mark.anyio
     @pytest.mark.parametrize('anyio_backend', ['asyncio'])
     @patch('app.services.auth_service.jwt.decode')
     async def test_get_current_user_nonexistent_user(self, mock_decode, test_db):
-        # Mock the jwt.decode function to return a payload with a non-existent user ID
         mock_decode.return_value = {'sub': '999'}
         
-        # Attempt to get the current user with a token for a non-existent user
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(HTTPException) as excinfo:
             await AuthService.get_current_user('token_for_nonexistent_user', test_db)
         
-        # Check that the exception is an HTTPException with status code 401
         assert excinfo.value.status_code == 401
         assert 'Could not validate credentials' in excinfo.value.detail
+
+    def test_get_or_create_google_user_inactive(self, test_db):
+        google_id = 'google_123'
+        email = 'google@example.com'
+        user = User(
+            username='google_user',
+            email=email,
+            google_id=google_id,
+            hashed_password='...',
+            is_active=False,
+        )
+        test_db.add(user)
+        test_db.commit()
+        
+        result = UserService.get_or_create_google_user(test_db, google_id, email)
+        assert result is None

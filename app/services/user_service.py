@@ -91,11 +91,15 @@ class UserService(BaseService[User]):
         # try to get user by google_id
         user = cls.get_user_by_google_id(db, google_id)
         if user:
+            if not user.is_active:
+                return None
             return user
 
         # try to get user by email
         user = cls.get_user_by_email(db, email)
         if user:
+            if not user.is_active:
+                return None
             user.google_id = google_id  # link existing user with google_id
             db.commit()
             db.refresh(user)

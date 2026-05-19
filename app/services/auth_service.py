@@ -47,7 +47,7 @@ class AuthService:
             UserService.get_user_by_username(db, username)
             or UserService.get_user_by_email(db, username)
         )
-        if not user or not validate_password(password, user.hashed_password):
+        if not user or not validate_password(password, user.hashed_password) or not user.is_active:
             return None
         return user
 
@@ -77,6 +77,9 @@ class AuthService:
             return None
 
         user = UserService.get_user_by_id(db, user_id=user_id)
+        if not user or not user.is_active:
+            return None
+
         return user
 
     @classmethod
@@ -92,7 +95,7 @@ class AuthService:
             raise cls.CREDENTIALS_EXCEPTION
 
         user = UserService.get_user_by_id(db, user_id=user_id)
-        if user is None:
+        if user is None or not user.is_active:
             raise cls.CREDENTIALS_EXCEPTION
             
         return user
