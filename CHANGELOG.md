@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.9] - 2026-05-19
+
+### Changed
+
+- Prevent inactive users from signing in
+
 ## [1.1.8] - 2026-05-15
 
 ### Added
