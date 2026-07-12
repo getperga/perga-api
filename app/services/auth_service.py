@@ -47,7 +47,12 @@ class AuthService:
             UserService.get_user_by_username(db, username)
             or UserService.get_user_by_email(db, username)
         )
-        if not user or not validate_password(password, user.hashed_password) or not user.is_active:
+        if (
+            not user
+            or not user.hashed_password
+            or not validate_password(password, user.hashed_password)
+            or not user.is_active
+        ):
             return None
         return user
 

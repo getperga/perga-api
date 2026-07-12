@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from unittest.mock import patch
 
 from app.core.config import settings
+from app.models.user import User
 from app.schemas.user import UserCreateSchema, UserUpdateSchema
 from app.services.auth_utils import validate_password
 from app.services.user_service import UserService
@@ -61,7 +62,7 @@ class TestUserService:
         assert db_user.id is not None
         assert db_user.username == user_create.username
         assert db_user.email == user_create.email
-        assert validate_password(user_create.password, db_user.hashed_password)
+        assert db_user.hashed_password and validate_password(user_create.password, db_user.hashed_password)
         assert db_user.is_active is True
 
     def test_create_user_duplicate_email(self, test_db: Session, test_user):
@@ -127,6 +128,30 @@ class TestUserService:
         with pytest.raises(ValueError) as excinfo:
             UserService.change_password(test_db, test_user.id, current_password='wrong', new_password='another')
         assert 'Incorrect current password' in str(excinfo.value)
+
+    def test_change_password_no_current(self, test_db: Session):
+        """ Checks case with google user signup without password """
+        db_user = User(
+            username='nopass',
+            email='nopass@example.com',
+            hashed_password=None,
+            is_active=True
+        )
+        test_db.add(db_user)
+        test_db.commit()
+        test_db.refresh(db_user)
+
+        updated_user = UserService.change_password(
+            test_db,
+            db_user.id,
+            current_password=None,
+            new_password='newpassword123'
+        )
+        assert (
+            updated_user
+            and updated_user.hashed_password
+            and validate_password('newpassword123', updated_user.hashed_password)
+        )
 
     def test_create_user_signup_disabled(self, test_db: Session):
         user_create = UserCreateSchema(

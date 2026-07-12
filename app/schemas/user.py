@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field, Field
 
 from app.const.planner import WeekStartDay
 
@@ -10,10 +10,15 @@ class UserSchema(BaseModel):
     week_start_day: WeekStartDay
     merge_weekends: bool
     google_id: str | None = None
+    hashed_password: str | None = Field(None, exclude=True)
+
+    @computed_field
+    @property
+    def has_password(self) -> bool:
+        return bool(self.hashed_password)
 
     class Config:
         from_attributes = True
-
 
 class UserCreateSchema(BaseModel):
     username: str
@@ -31,5 +36,5 @@ class UserUpdateSchema(BaseModel):
 
 
 class PasswordChangeSchema(BaseModel):
-    current_password: str
+    current_password: str | None = None  # can be None in case of google auth signup
     new_password: str
