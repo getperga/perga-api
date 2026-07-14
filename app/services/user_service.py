@@ -1,5 +1,3 @@
-import secrets
-import string
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -69,17 +67,22 @@ class UserService(BaseService[User]):
         return db_user
 
     @classmethod
-    def change_password(cls, db: Session, user_id: int, current_password: str, new_password: str) -> User | None:
+    def change_password(cls, db: Session, user_id: int, current_password: str | None, new_password: str) -> User | None:
         user = cls.get_user_by_id(db, user_id)
         if not user:
             return None
 
-        # Verify current password
-        if not validate_password(current_password, user.hashed_password):
-            # Do not change anything if verification fails
-            raise ValueError('Incorrect current password')
+        # validate if provided args are correct
+        if user.hashed_password:
+            if not current_password:
+                raise ValueError('Current password is required')
+            if not validate_password(current_password, user.hashed_password):
+                raise ValueError('Incorrect current password')
+        else:
+            # in case of setting new password for google auth user don't need current_password
+            if current_password:
+                raise ValueError('Invalid arguments')
 
-        # Update to new password
         user.hashed_password = generate_password_hash(new_password)
         db.commit()
 
@@ -108,14 +111,12 @@ class UserService(BaseService[User]):
         if settings.IS_SIGNUP_DISABLED:
             return None
 
-        # create new user with google_id and random password
-        random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
-        hashed_password = generate_password_hash(random_password)
+        # create new user with google_id and no password
         db_user = User(
             email=email,
             username=email,
             google_id=google_id,
-            hashed_password=hashed_password,
+            hashed_password=None,
             is_active=True
         )
         db.add(db_user)

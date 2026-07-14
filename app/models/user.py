@@ -13,17 +13,17 @@ __all__ = (
 class User(BaseModel):
     __tablename__ = "users"
 
-    username = Column(String(length=64), unique=True, index=True, nullable=False)
-    email = Column(String(length=64), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(length=128), nullable=False)
-    is_active = Column(Boolean, default=True, server_default=true(), nullable=False)
+    username: str = Column(String(length=64), unique=True, index=True, nullable=False)
+    email: str = Column(String(length=64), unique=True, index=True, nullable=False)
+    hashed_password: str | None = Column(String(length=128), nullable=True)
+    is_active: bool = Column(Boolean, default=True, server_default=true(), nullable=False)
 
     # external auth
-    google_id = Column(String(length=128), unique=True, index=True, nullable=True)
+    google_id: str | None = Column(String(length=128), unique=True, index=True, nullable=True)
 
     # Preferences
-    week_start_day = Column(String(length=32), default=WeekStartDay.MONDAY, nullable=False)
-    merge_weekends = Column(Boolean, default=False, server_default=false(), nullable=False)
+    week_start_day: str = Column(String(length=32), default=WeekStartDay.MONDAY, nullable=False)
+    merge_weekends: bool = Column(Boolean, default=False, server_default=false(), nullable=False)
 
     # Relationships
     planner_agendas = relationship("PlannerAgenda", back_populates="user")

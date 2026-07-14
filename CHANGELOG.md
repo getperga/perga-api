@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.10] - 2026-07-14
+
+### Changed
+
+- Make User.hashed_password nullable
+- Allow null values for current_password in the change_password view
+- Set google auth user password to None on creation
+
 ## [1.1.9] - 2026-05-19
 
 ### Changed
