@@ -26,7 +26,6 @@ jobs:
           --health-retries=5
 
     env:
-      DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
       SECRET_KEY: fake_test_key
       CORS_ORIGINS: http://localhost
 

@@ -1,55 +1,46 @@
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
-from app.core.database import Base, get_db
+from app.core.config import settings
+from app.core.database import get_db
 from app.main import app
 
-# Use an in-memory SQLite database for testing
-SQLALCHEMY_DATABASE_URL = 'sqlite:///:memory:'
+
+@pytest.fixture(scope='session')
+def test_engine():
+    engine = create_engine(settings.sqlalchemy_database_uri)
+
+    cfg = Config('alembic.ini')
+    command.upgrade(cfg, 'head')
+
+    yield engine
+
+    command.downgrade(cfg, 'base')
+    engine.dispose()
+
 
 @pytest.fixture(scope='function')
-def test_engine():
-    # Create the SQLite engine with check_same_thread=False to allow multiple threads
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        connect_args={'check_same_thread': False},
-        poolclass=StaticPool,
-    )
+def test_db(test_engine):
+    connection = test_engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection, join_transaction_mode='create_savepoint')
 
-    # Create all tables in the database
-    Base.metadata.create_all(bind=engine)
-    
-    yield engine
-    
-    # Drop all tables after the test
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def test_db_factory(test_engine):
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)  # noqa: N806
-    return TestingSessionLocal
-
-
-@pytest.fixture(scope="function")
-def test_db(test_db_factory):
-    db = test_db_factory()
     try:
-        yield db
+        yield session
     finally:
-        db.close()
+        session.close()
+        transaction.rollback()
+        connection.close()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope='function')
 def client(test_db):
     def override_get_db():
-        try:
-            yield test_db
-        finally:
-            pass
+        yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
