@@ -1,7 +1,12 @@
 import logging
-from sqlalchemy.orm import Session, Query
-from sqlalchemy.exc import IntegrityError
+from collections.abc import Iterable
 from typing import Generic, TypeVar
+
+from sqlalchemy import SQLColumnExpression, select
+from sqlalchemy.engine import ScalarResult
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Query, Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.base import BaseModel
 
@@ -9,6 +14,7 @@ from app.models.base import BaseModel
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+ScalarT = TypeVar('ScalarT')
 
 
 class BaseService(Generic[T]):
@@ -16,7 +22,22 @@ class BaseService(Generic[T]):
 
     @classmethod
     def get_base_query(cls, db: Session) -> Query:
+        """ Returns SQLAlchemy Query with non deleted objects """
         return db.query(cls.model).filter(cls.model.is_deleted.is_(False))
+
+    @classmethod
+    def get_scalars_for_single_column(
+        cls,
+        db: Session,
+        column: SQLColumnExpression[ScalarT],
+        filters: Iterable[ColumnElement[bool]] = (),
+    ) -> ScalarResult[ScalarT]:
+        """ Returns ScalarResult for provided single column from non-deleted objects """
+        query = select(column).where(
+            cls.model.is_deleted.is_(False),
+            *filters,
+        )
+        return db.scalars(query)
 
     @classmethod
     def get_or_create(cls, db: Session, defaults: dict | None = None, **kwargs) -> tuple[T, bool]:
