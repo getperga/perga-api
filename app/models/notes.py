@@ -31,14 +31,12 @@ class NotesFolder(BaseModel):
             'user_id',
             unique=True,
             postgresql_where=(folder_type == NotesFolderType.ROOT),
-            sqlite_where=(folder_type == NotesFolderType.ROOT)
         ),
         Index(
             'idx_notes_folders_user_trash',
             'user_id',
             unique=True,
             postgresql_where=(folder_type == NotesFolderType.TRASH),
-            sqlite_where=(folder_type == NotesFolderType.TRASH)
         ),
     )
 

@@ -106,7 +106,7 @@ class NotesFolderService(BaseService[NotesFolder]):
         )).filter(
             Note.user_id == user_id,
             Note.is_deleted.is_(False),
-        ).order_by(Note.updated_dt.desc()).all()
+        ).all()
 
         folder_notes_map = defaultdict(list)
         for note in user_notes:
