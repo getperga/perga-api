@@ -21,9 +21,15 @@ class BaseService(Generic[T]):
     model: type[T]
 
     @classmethod
-    def get_base_query(cls, db: Session) -> Query:
-        """ Returns SQLAlchemy Query with non deleted objects """
-        return db.query(cls.model).filter(cls.model.is_deleted.is_(False))
+    def get_base_query(cls, db: Session, user_id: int | None = None) -> Query[T]:
+        """
+        Returns SQLAlchemy Query with non deleted objects.
+        Also accepts optional user_id arg: all models except User are bound to specific user and can be filtered.
+        """
+        query = db.query(cls.model).filter(cls.model.is_deleted.is_(False))
+        if user_id is not None and getattr(cls.model, 'user_id'):
+            query = query.filter(cls.model.user_id == user_id)
+        return query
 
     @classmethod
     def get_scalars_for_single_column(

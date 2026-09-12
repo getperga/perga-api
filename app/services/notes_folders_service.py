@@ -13,7 +13,7 @@ class NotesFolderService(BaseService[NotesFolder]):
 
     @classmethod
     def get_folder(cls, db: Session, folder_id: int, user_id: int) -> NotesFolder | None:
-        return cls.get_base_query(db).filter(NotesFolder.user_id == user_id, NotesFolder.id == folder_id).first()
+        return cls.get_base_query(db, user_id=user_id).filter(NotesFolder.id == folder_id).first()
 
     @classmethod
     def create_folder(cls, db: Session, user_id: int, create_data: NotesFolderCreateSchema) -> NotesFolder:
@@ -89,7 +89,7 @@ class NotesFolderService(BaseService[NotesFolder]):
         root_folder = cls.get_root_folder(db, user_id)
         trash_folder = cls.get_trash_folder(db, user_id)
 
-        user_folders = cls.get_base_query(db).filter(NotesFolder.user_id == user_id).all()
+        user_folders = cls.get_base_query(db, user_id=user_id).all()
         folders_map = {folder.id: folder for folder in user_folders}
 
         subfolders_map = defaultdict(list)
@@ -145,7 +145,7 @@ class NotesFolderService(BaseService[NotesFolder]):
     @classmethod
     def get_folders_path_map(cls, db: Session, user_id: int) -> dict[int, list[str]]:
         """ Builds a map folder_id -> breadcrumb path names, e.g. {5: ['Folder1', 'Subfolder'], 6: ['Trash']} """
-        user_folders = cls.get_base_query(db).filter(NotesFolder.user_id == user_id)
+        user_folders = cls.get_base_query(db, user_id=user_id).all()
         folders_id_map: dict[int, NotesFolder]  = {folder.id: folder for folder in user_folders}
         folders_path_map: dict[int, list[str]] = {}
 

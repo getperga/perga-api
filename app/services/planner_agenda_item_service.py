@@ -18,27 +18,18 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
 
     @classmethod
     def get_new_agenda_item_index(cls, db: Session, agenda_id: int, user_id: int) -> int:
-        query = cls.get_base_query(db).filter(
-            PlannerAgendaItem.user_id == user_id,
-            PlannerAgendaItem.agenda_id == agenda_id
-        )
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerAgendaItem.agenda_id == agenda_id)
         max_index: PlannerAgendaItem = query.order_by(PlannerAgendaItem.index.desc()).first()
         return max_index.index + 1 if max_index else 0
 
     @classmethod
     def get_agenda_item(cls, db: Session, item_id: int, user_id: int) -> PlannerAgendaItem | None:
-        query = cls.get_base_query(db).filter(
-            PlannerAgendaItem.user_id == user_id,
-            PlannerAgendaItem.id == item_id
-        )
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerAgendaItem.id == item_id)
         return query.first()
 
     @classmethod
     def get_items_by_agendas(cls, db: Session, agenda_id: int, user_id: int) -> list[PlannerAgendaItem]:
-        query = cls.get_base_query(db).filter(
-            PlannerAgendaItem.user_id == user_id,
-            PlannerAgendaItem.agenda_id == agenda_id
-        )
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerAgendaItem.agenda_id == agenda_id)
         return query.order_by(PlannerAgendaItem.index).all()
 
     @classmethod
@@ -49,9 +40,8 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
         if not agenda_ids:
             return {}
 
-        items = cls.get_base_query(db).filter(
-            PlannerAgendaItem.user_id == user_id,
-            PlannerAgendaItem.agenda_id.in_(agenda_ids),
+        items = cls.get_base_query(db, user_id=user_id).filter(
+            PlannerAgendaItem.agenda_id.in_(agenda_ids)
         ).order_by(PlannerAgendaItem.agenda_id, PlannerAgendaItem.index).all()
 
         agenda_items_map = defaultdict(list)
@@ -164,8 +154,7 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
     @classmethod
     def delete_finished_agenda_items(cls, db: Session, agenda_id: int, user_id: int) -> bool:
         """ Marks all finished (completed, dropped, snoozed) items in agenda as deleted """
-        cls.get_base_query(db).filter(
-            PlannerAgendaItem.user_id == user_id,
+        cls.get_base_query(db, user_id=user_id).filter(
             PlannerAgendaItem.agenda_id == agenda_id,
             PlannerAgendaItem.state.in_([
                 PlannerItemState.COMPLETED, PlannerItemState.DROPPED, PlannerItemState.SNOOZED
@@ -182,8 +171,7 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
         """ Reorders items so that completed come first, keeping relative order within groups """
         try:
             with atomic_transaction(db):
-                items = cls.get_base_query(db).filter(
-                    PlannerAgendaItem.user_id == user_id,
+                items = cls.get_base_query(db, user_id=user_id).filter(
                     PlannerAgendaItem.agenda_id == agenda_id,
                 ).order_by(PlannerAgendaItem.index).all()
 
