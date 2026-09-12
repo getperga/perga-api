@@ -1,7 +1,9 @@
-from sqlalchemy.orm import Session
+from collections import defaultdict
+from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.const.notes import NotesFolderType
-from app.models.notes import NotesFolder
+from app.models.notes import Note, NotesFolder
 from app.schemas.notes_folders import NotesFolderCreateSchema, NotesFolderUpdateSchema
 from app.services.base_service import BaseService
 
@@ -86,9 +88,38 @@ class NotesFolderService(BaseService[NotesFolder]):
     def get_folders(cls, db: Session, user_id: int) -> dict:
         root_folder = cls.get_root_folder(db, user_id)
         trash_folder = cls.get_trash_folder(db, user_id)
+
+        user_folders = cls.get_base_query(db).filter(NotesFolder.user_id == user_id).all()
+        folders_map = {folder.id: folder for folder in user_folders}
+
+        subfolders_map = defaultdict(list)
+        for folder in user_folders:
+            subfolders_map[folder.parent_id].append(folder)
+
+        # fetch only fields required for folders tree
+        user_notes = db.query(Note).options(load_only(
+            Note.id,
+            Note.folder_id,
+            Note.is_deleted,
+            Note.title,
+            Note.updated_dt,
+        )).filter(
+            Note.user_id == user_id,
+            Note.is_deleted.is_(False),
+        ).order_by(Note.updated_dt.desc()).all()
+
+        folder_notes_map = defaultdict(list)
+        for note in user_notes:
+            folder_notes_map[note.folder_id].append(note)
+
+        # add notes and subfolders as fields to folders
+        for folder in user_folders:
+            set_committed_value(folder, 'notes', folder_notes_map[folder.id])
+            set_committed_value(folder, 'subfolders', subfolders_map[folder.id])
+
         return {
-            'root_folder': root_folder,
-            'trash_folder': trash_folder
+            'root_folder': folders_map[root_folder.id],
+            'trash_folder': folders_map[trash_folder.id],
         }
 
     @classmethod
