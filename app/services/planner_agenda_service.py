@@ -113,22 +113,6 @@ class PlannerAgendaService(BaseService[PlannerAgenda]):
         return query.first()
 
     @classmethod
-    def get_user_agenda_ids(cls, db: Session, agenda_ids: list[int], user_id: int) -> set[int]:
-        """ Returns provided agenda ids, filtered by user_id and not deleted """
-        if not agenda_ids:
-            return set()
-
-        agenda_ids = cls.get_scalars_for_single_column(
-            db,
-            PlannerAgenda.id,
-            filters=(
-                PlannerAgenda.user_id == user_id,
-                PlannerAgenda.id.in_(agenda_ids),
-            ),
-        ).all()
-        return set(agenda_ids)
-
-    @classmethod
     def create_planner_agenda(cls, db: Session, agenda_item: PlannerAgendaCreateSchema, user_id: int) -> PlannerAgenda:
         if agenda_item.index is None:
             agenda_item.index = cls.get_new_agenda_index(db, user_id)

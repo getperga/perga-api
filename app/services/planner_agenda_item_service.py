@@ -28,11 +28,6 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
         return query.first()
 
     @classmethod
-    def get_items_by_agendas(cls, db: Session, agenda_id: int, user_id: int) -> list[PlannerAgendaItem]:
-        query = cls.get_base_query(db, user_id=user_id).filter(PlannerAgendaItem.agenda_id == agenda_id)
-        return query.order_by(PlannerAgendaItem.index).all()
-
-    @classmethod
     def get_items_grouped_by_agenda_id(
         cls, db: Session, agenda_ids: set[int], user_id: int
     ) -> dict[int, list[PlannerAgendaItem]]:

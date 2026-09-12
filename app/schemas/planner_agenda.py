@@ -45,6 +45,11 @@ class PlannerAgendaItemSchema(BasePlannerItemBaseSchema):
     agenda_id: int
 
 
+class PlannerAgendasWithItemsSchema(BaseModel):
+    agendas: list[PlannerAgendaSchema]
+    items: dict[int, list[PlannerAgendaItemSchema]]
+
+
 class ReorderAgendaItemsSchema(BaseModel):
     ordered_item_ids: list[int]
 
