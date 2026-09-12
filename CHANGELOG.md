@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.1] - 2026-09-12
+
+### Fixed
+
+- Optimized db queries number
+
 ## [1.2.0] - 2026-07-26
 
 ### Added
