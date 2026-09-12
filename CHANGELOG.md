@@ -4,7 +4,11 @@
 
 ### Added
 
-- db indexes for PlannerDayItem and PlannerAgendaItem models 
+- db indexes for PlannerDayItem and PlannerAgendaItem models
+
+### Changed
+
+- use env vars for sqlalchemy config params
 
 ### Fixed
 
