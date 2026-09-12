@@ -2,9 +2,14 @@
 
 ## [1.2.1] - 2026-09-12
 
+### Added
+
+- db indexes for PlannerDayItem and PlannerAgendaItem models 
+
 ### Fixed
 
-- Optimized db queries number
+- optimized db queries number
+- removed sqlite related code
 
 ## [1.2.0] - 2026-07-26
 
