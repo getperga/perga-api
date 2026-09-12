@@ -57,7 +57,7 @@ You can try out Perga without installation by visiting demo version at [https://
    ```bash
    pip install -r requirements.txt
    ```
-2. Configure your environment by creating a `.env` file (see `.env-example`).
+2. Configure your environment by creating a `.env` file (see `.env.example`).
 3. Run the application:
    ```bash
    uvicorn app.main:app --reload

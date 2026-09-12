@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.1] - 2026-09-12
+
+### Added
+
+- db indexes for PlannerDayItem and PlannerAgendaItem models
+
+### Changed
+
+- use env vars for sqlalchemy config params
+
+### Fixed
+
+- optimized db queries number
+- removed sqlite related code
+
 ## [1.2.0] - 2026-07-26
 
 ### Added

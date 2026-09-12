@@ -25,6 +25,24 @@ class TestBaseServiceFunctionality:
         assert user.id in non_deleted_users_ids
         assert deleted_user.id not in non_deleted_users_ids
 
+    def test_get_scalars_for_single_column(self, test_db: Session):
+        user = User(username=TEST_USERNAME, email=TEST_EMAIL, hashed_password='hashed1')
+        deleted_user = User(
+            username='deleteduser',
+            email='deleted@example.com',
+            hashed_password='hashed2',
+        )
+        deleted_user.mark_as_deleted()
+        test_db.add_all([user, deleted_user])
+        test_db.commit()
+
+        user_ids = UserTestService.get_scalars_for_single_column(
+            test_db,
+            User.id,
+            filters=(User.id == user.id,),
+        ).all()
+        assert user_ids == [user.id]
+
     def test_get_or_create_existing(self, test_db: Session):
         username = 'existing_user'
         email = 'existing@example.com'

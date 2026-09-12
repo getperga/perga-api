@@ -42,14 +42,13 @@ class NoteService(BaseService[Note]):
 
     @classmethod
     def get_note(cls, db: Session, note_id: int, user_id: int) -> Note | None:
-        return cls.get_base_query(db).filter(Note.user_id == user_id, Note.id == note_id).first()
+        return cls.get_base_query(db, user_id=user_id).filter(Note.id == note_id).first()
 
     @classmethod
     def search_notes(cls, db: Session, user_id: int, query: str, limit: int = 50) -> list[Note]:
         """ Search notes with a postgres full-text vector query """
         ts_query = func.websearch_to_tsquery('simple', query)
-        filtered_query = cls.get_base_query(db).filter(
-            Note.user_id == user_id,
+        filtered_query = cls.get_base_query(db, user_id=user_id).filter(
             Note.search_vector.op('@@')(ts_query)
         )
         notes = filtered_query.order_by(
