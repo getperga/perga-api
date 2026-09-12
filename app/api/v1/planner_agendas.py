@@ -188,18 +188,9 @@ def get_items_by_agendas(
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(AuthService.get_current_user)
 ):
-    result = {}
-    for agenda_id in agenda_ids:
-        # Check if agenda exists and belongs to the current user
-        db_agenda = PlannerAgendaService.get_planner_agenda(db, agenda_id, user_id=current_user.id)
-        if not db_agenda:
-            continue
-
-        # Get items for this agenda
-        items = PlannerAgendaItemService.get_items_by_agendas(db, agenda_id, user_id=current_user.id)
-        result[agenda_id] = items
-
-    return result
+    user_agenda_ids = PlannerAgendaService.get_user_agenda_ids(db, agenda_ids, current_user.id)
+    agenda_items_map = PlannerAgendaItemService.get_items_grouped_by_agenda_id(db, user_agenda_ids, current_user.id)
+    return agenda_items_map
 
 
 @router.post("/items/{item_id}/copy/", response_model=PlannerAgendaItemSchema)

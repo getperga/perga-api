@@ -1,5 +1,7 @@
 import datetime as dt
 import logging
+from collections import defaultdict
+
 from sqlalchemy.orm import Session
 
 from app.const.planner import PlannerItemState
@@ -38,6 +40,24 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
             PlannerAgendaItem.agenda_id == agenda_id
         )
         return query.order_by(PlannerAgendaItem.index).all()
+
+    @classmethod
+    def get_items_grouped_by_agenda_id(
+        cls, db: Session, agenda_ids: set[int], user_id: int
+    ) -> dict[int, list[PlannerAgendaItem]]:
+        """Load all items for the supplied agendas in one query and group them in memory."""
+        if not agenda_ids:
+            return {}
+
+        items = cls.get_base_query(db).filter(
+            PlannerAgendaItem.user_id == user_id,
+            PlannerAgendaItem.agenda_id.in_(agenda_ids),
+        ).order_by(PlannerAgendaItem.agenda_id, PlannerAgendaItem.index).all()
+
+        agenda_items_map = defaultdict(list)
+        for item in items:
+            agenda_items_map[item.agenda_id].append(item)
+        return agenda_items_map
 
     @classmethod
     def create_agenda_item(cls, db: Session, item: PlannerAgendaItemCreateSchema, user_id: int) -> PlannerAgendaItem:
