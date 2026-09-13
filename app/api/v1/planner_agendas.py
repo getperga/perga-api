@@ -10,7 +10,7 @@ from app.schemas.planner_agenda import (
     PlannerAgendaItemSchema, PlannerAgendaItemCreateSchema, PlannerAgendaItemUpdateSchema,
     ReorderAgendaItemsSchema, ReorderAgendasSchema,
     CopyAgendaItemSchema, MoveAgendaItemSchema,
-    PlannerAgendaActionSchema,
+    PlannerAgendaActionSchema, PlannerAgendasWithItemsSchema,
 )
 from app.services.planner_agenda_service import PlannerAgendaService
 from app.services.planner_agenda_item_service import PlannerAgendaItemService
@@ -19,7 +19,7 @@ from app.schemas.user import UserSchema
 router = APIRouter()
 
 
-@router.get("/", response_model=list[PlannerAgendaSchema])
+@router.get("/", response_model=list[PlannerAgendaSchema] | PlannerAgendasWithItemsSchema)
 def get_agendas(
     agenda_types: list[PlannerAgendaType] | None = Query(
         None, description="Agenda types to include: monthly, custom, archived"
@@ -28,10 +28,18 @@ def get_agendas(
         None, description="Reference day to resolve monthly agenda (defaults to today)"
     ),
     with_counts: bool | None = Query(False, description="Include agenda items counts"),
+    with_items: bool = Query(False, description="Include agenda items grouped by agenda_id"),
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(AuthService.get_current_user)
 ):
     agendas = PlannerAgendaService.get_agendas(db, current_user.id, agenda_types, selected_day, with_counts)
+    if with_items:
+        agenda_ids = {agenda.id for agenda in agendas}
+        agenda_items_map = PlannerAgendaItemService.get_items_grouped_by_agenda_id(db, agenda_ids, current_user.id)
+        return {
+            "agendas": agendas,
+            "items": {agenda.id: agenda_items_map.get(agenda.id, []) for agenda in agendas},
+        }
     return agendas
 
 
@@ -180,26 +188,6 @@ def reorder_agenda_items(
     if not success:
         raise HTTPException(status_code=400, detail="Failed to reorder agenda items")
     return {"detail": "Agenda items reordered successfully"}
-
-
-@router.get("/items/", response_model=dict[int, list[PlannerAgendaItemSchema]])
-def get_items_by_agendas(
-    agenda_ids: list[int] = Query(..., description="List of agenda IDs"),
-    db: Session = Depends(get_db),
-    current_user: UserSchema = Depends(AuthService.get_current_user)
-):
-    result = {}
-    for agenda_id in agenda_ids:
-        # Check if agenda exists and belongs to the current user
-        db_agenda = PlannerAgendaService.get_planner_agenda(db, agenda_id, user_id=current_user.id)
-        if not db_agenda:
-            continue
-
-        # Get items for this agenda
-        items = PlannerAgendaItemService.get_items_by_agendas(db, agenda_id, user_id=current_user.id)
-        result[agenda_id] = items
-
-    return result
 
 
 @router.post("/items/{item_id}/copy/", response_model=PlannerAgendaItemSchema)

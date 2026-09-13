@@ -6,10 +6,10 @@ from app.core.config import settings
 
 engine = create_engine(
     settings.sqlalchemy_database_uri,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_recycle=1800,
+    pool_size=settings.SQLALCHEMY_POOL_SIZE,
+    max_overflow=settings.SQLALCHEMY_MAX_OVERFLOW,
+    pool_timeout=settings.SQLALCHEMY_POOL_TIMEOUT,
+    pool_recycle=settings.SQLALCHEMY_POOL_RECYCLE,
     pool_pre_ping=True
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

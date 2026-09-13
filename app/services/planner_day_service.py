@@ -18,26 +18,18 @@ class PlannerDayItemService(BaseService[PlannerDayItem]):
 
     @classmethod
     def get_new_item_index(cls, db: Session, day: dt.date, user_id: int) -> int:
-        max_index_item: PlannerDayItem = cls.get_base_query(db).filter(
-            PlannerDayItem.day == day,
-            PlannerDayItem.user_id == user_id
-        ).order_by(PlannerDayItem.index.desc()).first()
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerDayItem.day == day)
+        max_index_item: PlannerDayItem | None = query.order_by(PlannerDayItem.index.desc()).first()
         return max_index_item.index + 1 if max_index_item else 0
 
     @classmethod
     def get_day_item(cls, db: Session, item_id: int, user_id: int) -> PlannerDayItem | None:
-        query = cls.get_base_query(db).filter(
-            PlannerDayItem.user_id == user_id,
-            PlannerDayItem.id == item_id
-        )
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerDayItem.id == item_id)
         return query.first()
 
     @classmethod
     def get_items_by_day(cls, db: Session, day: dt.date, user_id: int) -> list[PlannerDayItem]:
-        query = cls.get_base_query(db).filter(
-            PlannerDayItem.user_id == user_id,
-            PlannerDayItem.day == day
-        )
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerDayItem.day == day)
         return query.order_by(PlannerDayItem.index).all()
 
     @classmethod
@@ -46,8 +38,7 @@ class PlannerDayItemService(BaseService[PlannerDayItem]):
     ) -> dict[dt.date, list[PlannerDayItem]]:
         """ Get items for a range of days starting from start_date """
         end_date = start_date + dt.timedelta(days=days_count - 1)
-        items = cls.get_base_query(db).filter(
-            PlannerDayItem.user_id == user_id,
+        items = cls.get_base_query(db, user_id=user_id).filter(
             PlannerDayItem.day >= start_date,
             PlannerDayItem.day <= end_date
         ).order_by(PlannerDayItem.day, PlannerDayItem.index).all()

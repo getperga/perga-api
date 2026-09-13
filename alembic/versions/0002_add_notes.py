@@ -34,8 +34,8 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('idx_notes_folders_user_root', 'notes_folders', ['user_id'], unique=True, postgresql_where=sa.text("folder_type = 'root'"), sqlite_where=sa.text("folder_type = 'root'"))
-    op.create_index('idx_notes_folders_user_trash', 'notes_folders', ['user_id'], unique=True, postgresql_where=sa.text("folder_type = 'trash'"), sqlite_where=sa.text("folder_type = 'trash'"))
+    op.create_index('idx_notes_folders_user_root', 'notes_folders', ['user_id'], unique=True, postgresql_where=sa.text("folder_type = 'root'"))
+    op.create_index('idx_notes_folders_user_trash', 'notes_folders', ['user_id'], unique=True, postgresql_where=sa.text("folder_type = 'trash'"))
     op.create_index(op.f('ix_notes_folders_id'), 'notes_folders', ['id'], unique=False)
     op.create_index(op.f('ix_notes_folders_parent_id'), 'notes_folders', ['parent_id'], unique=False)
     op.create_index(op.f('ix_notes_folders_user_id'), 'notes_folders', ['user_id'], unique=False)
@@ -68,7 +68,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_notes_folders_user_id'), table_name='notes_folders')
     op.drop_index(op.f('ix_notes_folders_parent_id'), table_name='notes_folders')
     op.drop_index(op.f('ix_notes_folders_id'), table_name='notes_folders')
-    op.drop_index('idx_notes_folders_user_trash', table_name='notes_folders', postgresql_where=sa.text("folder_type = 'trash'"), sqlite_where=sa.text("folder_type = 'trash'"))
-    op.drop_index('idx_notes_folders_user_root', table_name='notes_folders', postgresql_where=sa.text("folder_type = 'root'"), sqlite_where=sa.text("folder_type = 'root'"))
+    op.drop_index('idx_notes_folders_user_trash', table_name='notes_folders', postgresql_where=sa.text("folder_type = 'trash'"))
+    op.drop_index('idx_notes_folders_user_root', table_name='notes_folders', postgresql_where=sa.text("folder_type = 'root'"))
     op.drop_table('notes_folders')
     # ### end Alembic commands ###

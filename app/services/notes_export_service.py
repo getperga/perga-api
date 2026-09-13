@@ -209,7 +209,7 @@ class NotesExportService:
     def export_all_notes(
         cls, db: Session, user_id: int, export_type: ExportType
     ) -> tuple[io.BytesIO, str] | tuple[None, None]:
-        notes = NoteService.get_base_query(db).filter(Note.user_id == user_id).all()
+        notes = NoteService.get_base_query(db, user_id=user_id).all()
         if not notes:
             return None, None
 

@@ -29,7 +29,7 @@ class PlannerAgendaService(BaseService[PlannerAgenda]):
         2. Custom - active custom agendas
         3. Archived - archived custom agendas
         """
-        base_query = cls.get_base_query(db).filter(PlannerAgenda.user_id == user_id)
+        base_query = cls.get_base_query(db, user_id=user_id)
         result_agendas = []
 
         if PlannerAgendaType.MONTHLY in agenda_types:
@@ -103,16 +103,13 @@ class PlannerAgendaService(BaseService[PlannerAgenda]):
 
     @classmethod
     def get_new_agenda_index(cls, db: Session, user_id) -> int:
-        query = cls.get_base_query(db).filter(PlannerAgenda.user_id == user_id)
+        query = cls.get_base_query(db, user_id=user_id)
         max_index_agenda = query.order_by(PlannerAgenda.index.desc()).first()
         return max_index_agenda.index + 1 if max_index_agenda else PLANNER_CUSTOM_AGENDA_INDEX_MIN
 
     @classmethod
     def get_planner_agenda(cls, db: Session, agenda_id: int, user_id: int) -> PlannerAgenda | None:
-        query = cls.get_base_query(db).filter(
-            PlannerAgenda.user_id == user_id,
-            PlannerAgenda.id == agenda_id
-        )
+        query = cls.get_base_query(db, user_id=user_id).filter(PlannerAgenda.id == agenda_id)
         return query.first()
 
     @classmethod

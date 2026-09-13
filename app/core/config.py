@@ -1,5 +1,6 @@
 import logging
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -17,6 +18,11 @@ class Settings(BaseSettings):
     POSTGRES_USER: str | None = None
     POSTGRES_PASSWORD: str | None = None
     POSTGRES_DB: str | None = None
+
+    SQLALCHEMY_POOL_SIZE: int = Field(default=5, ge=1)
+    SQLALCHEMY_MAX_OVERFLOW: int = Field(default=10, ge=0)
+    SQLALCHEMY_POOL_TIMEOUT: int = Field(default=30, ge=1)
+    SQLALCHEMY_POOL_RECYCLE: int = Field(default=1800, ge=1)
 
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None

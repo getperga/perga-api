@@ -11,10 +11,6 @@ class BasePlannerItemBaseSchema(BaseModel):
     state: PlannerItemState
 
 
-class PlannerDayItemBaseSchema(BasePlannerItemBaseSchema):
-    day: date
-
-
 class PlannerDayItemCreateSchema(BaseModel):
     day: date
     text: str

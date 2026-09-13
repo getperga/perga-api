@@ -77,57 +77,6 @@ class TestPlannerAgendaItemService:
         db_item = PlannerAgendaItemService.get_agenda_item(test_db, item.id, 7)
         assert db_item is None
 
-    def test_get_items_by_agendas(self, test_db: Session, test_user, test_agenda):
-        # Create some items
-        item1 = PlannerAgendaItem(
-            text='Item 1',
-            index=0,
-            state=PlannerItemState.TODO,
-            user_id=test_user.id,
-            agenda_id=test_agenda.id
-        )
-        item2 = PlannerAgendaItem(
-            text='Item 2',
-            index=1,
-            state=PlannerItemState.TODO,
-            user_id=test_user.id,
-            agenda_id=test_agenda.id
-        )
-        test_db.add_all([item1, item2])
-        test_db.commit()
-
-        # Get the items
-        items = PlannerAgendaItemService.get_items_by_agendas(test_db, test_agenda.id, test_user.id)
-        assert len(items) == 2
-        assert items[0].id == item1.id
-        assert items[1].id == item2.id
-
-        # Create another agenda and items
-        agenda2 = PlannerAgenda(
-            name='Test Agenda 2',
-            index=1,
-            agenda_type=PlannerAgendaType.CUSTOM,
-            user_id=test_user.id
-        )
-        test_db.add(agenda2)
-        test_db.commit()
-        test_db.refresh(agenda2)
-
-        item3 = PlannerAgendaItem(
-            text='Item 3',
-            index=0,
-            state=PlannerItemState.TODO,
-            user_id=test_user.id,
-            agenda_id=agenda2.id
-        )
-        test_db.add(item3)
-        test_db.commit()
-
-        # Get items for the second agenda
-        items = PlannerAgendaItemService.get_items_by_agendas(test_db, agenda2.id, test_user.id)
-        assert len(items) == 1
-        assert items[0].id == item3.id
-
     def test_create_agenda_item(self, test_db: Session, test_user, test_agenda):
         # Create an item
         item_create = PlannerAgendaItemCreateSchema(

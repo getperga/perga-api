@@ -78,7 +78,7 @@ class TestNotesImportService:
         # Check note 2 (in folder1)
         note2 = next(note for note in notes if note.title == 'Title 2')
         assert note2.body == '<p>Body 2</p>'
-        folder1 = NotesFolderService.get_base_query(test_db).filter_by(name='folder1', user_id=test_user.id).first()
+        folder1 = NotesFolderService.get_base_query(test_db, user_id=test_user.id).filter_by(name='folder1').first()
         assert folder1 is not None
         assert note2.folder_id == folder1.id
         assert folder1.parent_id == root_folder.id
@@ -86,7 +86,7 @@ class TestNotesImportService:
         # Check note 3 (in folder1/subfolder)
         note3 = next(note for note in notes if note.title == 'Title 3')
         assert 'Body 3' in note3.body
-        subfolder = NotesFolderService.get_base_query(test_db).filter_by(name='subfolder', user_id=test_user.id).first()
+        subfolder = NotesFolderService.get_base_query(test_db, user_id=test_user.id).filter_by(name='subfolder').first()
         assert subfolder is not None
         assert note3.folder_id == subfolder.id
         assert subfolder.parent_id == folder1.id
@@ -103,5 +103,5 @@ class TestNotesImportService:
         root_folder = NotesFolderService.get_root_folder(test_db, test_user.id)
         NotesImportService.import_zip(test_db, test_user.id, zip_content, root_folder.id)
         
-        folder = NotesFolderService.get_base_query(test_db).filter_by(name=name_utf8, user_id=test_user.id).first()
+        folder = NotesFolderService.get_base_query(test_db, user_id=test_user.id).filter_by(name=name_utf8).first()
         assert folder is not None, f"Folder with name '{name_utf8}' should exist"

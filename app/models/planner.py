@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Date, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Date, ForeignKey, Index, UniqueConstraint, text as sql_text
 from sqlalchemy.orm import relationship
 
 from app.const.planner import PlannerAgendaType, PlannerItemState
@@ -15,7 +15,11 @@ __all__ = (
 class PlannerAgenda(BaseModel):
     __tablename__ = "planner_agendas"
     __table_args__ = (
-        UniqueConstraint('user_id', 'agenda_type', 'name',  name='uix_user_agenda_type_name'),
+        # constraint creates index as well
+        UniqueConstraint(
+            'user_id', 'agenda_type', 'name',
+            name='uix_user_agenda_type_name'
+        ),
     )
 
     name = Column(String(length=64), nullable=False)
@@ -42,6 +46,13 @@ class BasePlannerItem(BaseModel):
 
 class PlannerDayItem(BasePlannerItem):
     __tablename__ = "planner_day_items"
+    __table_args__ = (
+        Index(
+            'idx_planner_day_items_active_user_day_index',
+            'user_id', 'day', 'index',
+            postgresql_where=sql_text('is_deleted IS FALSE'),
+        ),
+    )
 
     day = Column(Date, index=True)
 
@@ -54,6 +65,13 @@ class PlannerDayItem(BasePlannerItem):
 
 class PlannerAgendaItem(BasePlannerItem):
     __tablename__ = "planner_agenda_items"
+    __table_args__ = (
+        Index(
+            'idx_planner_agenda_items_active_agenda_index',
+            'agenda_id', 'index',
+            postgresql_where=sql_text('is_deleted IS FALSE'),
+        ),
+    )
 
     agenda_id = Column(Integer, ForeignKey("planner_agendas.id"), nullable=False)
 
