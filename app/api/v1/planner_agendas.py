@@ -21,8 +21,8 @@ router = APIRouter()
 
 @router.get("/", response_model=list[PlannerAgendaSchema] | PlannerAgendasWithItemsSchema)
 def get_agendas(
-    agenda_types: list[PlannerAgendaType] | None = Query(
-        None, description="Agenda types to include: monthly, custom, archived"
+    agenda_types: list[PlannerAgendaType] = Query(
+        ..., description="Agenda types to include: monthly, custom, archived"
     ),
     selected_day: date | None = Query(
         None, description="Reference day to resolve monthly agenda (defaults to today)"
