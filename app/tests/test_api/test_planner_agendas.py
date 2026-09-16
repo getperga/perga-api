@@ -7,6 +7,14 @@ from app.models.planner import PlannerAgenda, PlannerAgendaItem
 
 
 class TestPlannerAgendaAPI:
+    def test_get_agendas_requires_type_filter(self, client: TestClient, auth_headers):
+        response = client.get(
+            f'{settings.API_V1_STR}/planner/agendas/',
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+
     def test_get_agendas_with_items(self, client: TestClient, test_db: Session, test_user, auth_headers):
         agendas = [
             PlannerAgenda(
