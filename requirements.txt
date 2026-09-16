@@ -14,7 +14,7 @@ markdownify==1.2.2
 markdown==3.10.2
 pymdown-extensions==10.21.2
 beautifulsoup4==4.14.3
-weasyprint==68.1
+weasyprint==70.0
 nh3==0.3.4
 
 bcrypt==5.0.0
