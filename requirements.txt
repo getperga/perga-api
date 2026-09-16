@@ -4,7 +4,7 @@ sqlalchemy==2.0.48
 psycopg2-binary==2.9.11
 alembic==1.18.4
 pydantic==2.12.5
-pydantic-settings==2.13.1
+pydantic-settings==2.14.2
 
 requests==2.33.1
 python-dotenv==1.2.2
