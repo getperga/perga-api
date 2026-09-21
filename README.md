@@ -29,7 +29,7 @@ Try the hosted demo at [demo.getperga.me](https://demo.getperga.me/).
 ## Tech stack
 
 - Python 3.11 and [FastAPI](https://fastapi.tiangolo.com/)
-- PostgreSQL 15 and [SQLAlchemy 2](https://www.sqlalchemy.org/)
+- PostgreSQL 16 and [SQLAlchemy 2](https://www.sqlalchemy.org/)
 - Docker Compose and nginx
 
 ## Documentation
