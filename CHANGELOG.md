@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.2] - 2026-10-19
+
+### Changed
+
+- updated dependencies
+- updated README
+
+### Fixed
+
+- monthly agendas creation
+
 ## [1.2.1] - 2026-09-12
 
 ### Added
