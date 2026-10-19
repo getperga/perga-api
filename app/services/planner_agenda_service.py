@@ -44,17 +44,17 @@ class PlannerAgendaService(BaseService[PlannerAgenda]):
                 PlannerAgenda.name.in_(month_names)
             ).all()
 
-            # Ensure that month agenda exists
+            month_agendas_map = {agenda.name: agenda for agenda in month_agendas}
             for month_name in month_names:
-                try:
-                    month_agenda = [agenda for agenda in month_agendas if agenda.name == month_name][0]
-                except IndexError:
-                    agenda_create = PlannerAgendaCreateSchema(
+                month_agenda = month_agendas_map.get(month_name)
+                if month_agenda is None:
+                    month_agenda, _ = cls.get_or_create(
+                        db,
+                        defaults={'index': PLANNER_MONTHLY_AGENDA_INDEX},
                         name=month_name,
                         agenda_type=PlannerAgendaType.MONTHLY,
-                        index=PLANNER_MONTHLY_AGENDA_INDEX
+                        user_id=user_id
                     )
-                    month_agenda = cls.create_planner_agenda(db, agenda_create, user_id)
                 result_agendas.append(month_agenda)
 
         if PlannerAgendaType.CUSTOM in agenda_types:
