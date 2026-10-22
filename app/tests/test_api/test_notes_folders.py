@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.schemas.notes import NoteCreateSchema
+from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema
 from app.services.notes_folders_service import NotesFolderService
 from app.services.notes_service import NoteService
@@ -21,6 +21,12 @@ class TestNotesFolderAPI:
                 folder_id=root_folder.id
             )
         )
+        NoteService.update_note(
+            test_db,
+            note_id=note.id,
+            user_id=test_user.id,
+            update_data=NoteUpdateSchema(is_pinned=True),
+        )
         
         # 2. Call the get_folders API
         response = client.get(f'{settings.API_V1_STR}/notes/folders/', headers=auth_headers)
@@ -35,6 +41,7 @@ class TestNotesFolderAPI:
         assert len(notes) > 0
         note_data = notes[0]
         assert note_data['title'] == note.title
+        assert note_data['is_pinned'] is True
         assert 'body' not in note_data
 
     def test_get_folders_sorting_and_subfolders(self, client: TestClient, test_db: Session, test_user, auth_headers):

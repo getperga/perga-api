@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Computed, Integer, String, Text, ForeignKey, Index
+from sqlalchemy import Boolean, Column, Computed, Integer, String, Text, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import deferred, relationship
 
@@ -52,6 +52,7 @@ class Note(BaseModel):
     title = Column(String(length=256), nullable=False, default='')
     body = Column(Text, nullable=False, default='')
     body_plain_text = Column(Text, nullable=False, default='')
+    is_pinned = Column(Boolean, nullable=False, default=False)
 
     # special column for full-text search, use 'simple' without stemming/stopwords for now
     # TODO: think about using a language-specific config later

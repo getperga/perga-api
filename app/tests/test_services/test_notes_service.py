@@ -15,6 +15,7 @@ class TestNoteService:
         assert note.title == create.title
         assert note.body == create.body
         assert note.user_id == test_user.id
+        assert note.is_pinned is False
 
         fetched = NoteService.get_note(test_db, note_id=note.id, user_id=test_user.id)
         assert fetched is not None
@@ -36,6 +37,32 @@ class TestNoteService:
         assert updated is not None
         assert updated.title == 'New Title'
         assert updated.body == 'new'
+
+    def test_pin_and_unpin_note(self, test_db: Session, test_user):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+        note = NoteService.create_note(
+            test_db,
+            user_id=test_user.id,
+            create_data=NoteCreateSchema(title='Important', folder_id=root_folder.id)
+        )
+
+        pinned = NoteService.update_note(
+            test_db,
+            note_id=note.id,
+            user_id=test_user.id,
+            update_data=NoteUpdateSchema(is_pinned=True),
+        )
+        assert pinned is not None
+        assert pinned.is_pinned is True
+
+        unpinned = NoteService.update_note(
+            test_db,
+            note_id=note.id,
+            user_id=test_user.id,
+            update_data=NoteUpdateSchema(is_pinned=False),
+        )
+        assert unpinned is not None
+        assert unpinned.is_pinned is False
 
     def test_mark_note_as_deleted(self, test_db: Session, test_user):
         root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
