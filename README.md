@@ -36,10 +36,10 @@ Try the hosted demo at [demo.getperga.me](https://demo.getperga.me/).
 
 Installation, configuration, and development instructions are available in the [Perga documentation](https://docs.getperga.me/docs/perga-api).
 
-## License
-
-Perga API is licensed under the [MIT License](LICENSE).
-
 ## AI-assisted development
 
 AI tools are used to assist with development, including exploring solutions, writing code, and reviewing changes. All code is manually reviewed and tested by the developer before it is merged.
+
+## License
+
+Perga API is licensed under the [MIT License](LICENSE).
