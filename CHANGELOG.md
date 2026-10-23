@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.3] - 2026-10-23
+
+### Added
+
+- Note.is_pinned column
+
 ## [1.2.2] - 2026-10-19
 
 ### Changed

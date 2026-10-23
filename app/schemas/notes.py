@@ -12,6 +12,7 @@ class NoteUpdateSchema(BaseModel):
     folder_id: int = None
     title: str = None
     body: str = None
+    is_pinned: bool = False
 
 
 # NoteSchema without body to reduce get_folders response size
@@ -20,6 +21,7 @@ class NoteMetaSchema(BaseModel):
     folder_id: int
     title: str
     updated_dt: dt.datetime
+    is_pinned: bool
 
     class Config:
         from_attributes = True
