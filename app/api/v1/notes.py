@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -22,7 +22,7 @@ def create_note(
 
 @router.get("/search/", response_model=list[NoteSearchResultSchema])
 def search_notes(
-    query: str,
+    query: str = Query(min_length=1, max_length=200),
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(AuthService.get_current_user)
 ):

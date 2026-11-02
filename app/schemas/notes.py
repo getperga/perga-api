@@ -1,4 +1,6 @@
 import datetime as dt
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -36,6 +38,10 @@ class NoteSchema(NoteMetaSchema):
 
 class NoteSearchResultSchema(NoteMetaSchema):
     folders_path: list[str] = []
+    matched_in_title: bool
+    matched_in_body: bool
+    match_kind: Literal['exact', 'prefix', 'fuzzy']
+    find_query: str | None = None
 
     class Config:
         from_attributes = True
