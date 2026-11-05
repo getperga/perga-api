@@ -21,7 +21,7 @@ class NotesFolderService(BaseService[NotesFolder]):
         if data.get('parent_id') is None:
             root_folder = cls.get_root_folder(db, user_id)
             data['parent_id'] = root_folder.id
-            
+
         db_folder = NotesFolder(
             user_id=user_id,
             folder_type=NotesFolderType.REGULAR,
@@ -40,7 +40,7 @@ class NotesFolderService(BaseService[NotesFolder]):
         if not db_folder:
             return None
         update_data = update_data.model_dump(exclude_unset=True)
-        
+
         if 'parent_id' in update_data and update_data['parent_id'] is not None:
             new_parent_id = update_data['parent_id']
             if (
@@ -103,6 +103,8 @@ class NotesFolderService(BaseService[NotesFolder]):
             Note.is_deleted,
             Note.title,
             Note.updated_dt,
+            Note.is_pinned,
+            Note.pin_index,
         )).filter(
             Note.user_id == user_id,
             Note.is_deleted.is_(False),
@@ -125,14 +127,14 @@ class NotesFolderService(BaseService[NotesFolder]):
     @classmethod
     def empty_trash(cls, db: Session, user_id: int) -> None:
         trash_folder = cls.get_trash_folder(db, user_id)
-        
+
         def mark_children_as_deleted(folder: NotesFolder):
             """ Recursively mark subfolders and notes as deleted """
             # Mark all notes in this folder as deleted
             for note in folder.notes:
                 if not note.is_deleted:
                     note.mark_as_deleted()
-            
+
             # Recursively mark subfolders and their contents as deleted
             for subfolder in folder.subfolders:
                 if not subfolder.is_deleted:

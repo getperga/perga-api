@@ -54,6 +54,7 @@ class TestNoteService:
         )
         assert pinned is not None
         assert pinned.is_pinned is True
+        assert pinned.pin_index == 0
 
         unpinned = NoteService.update_note(
             test_db,
@@ -63,6 +64,36 @@ class TestNoteService:
         )
         assert unpinned is not None
         assert unpinned.is_pinned is False
+        assert unpinned.pin_index is None
+
+    def test_reorder_pinned_notes(self, test_db: Session, test_user):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+
+        notes = [
+            NoteService.create_note(
+                test_db,
+                user_id=test_user.id,
+                create_data=NoteCreateSchema(title=f'Pinned {index}', folder_id=root_folder.id),
+            )
+            for index in range(2)
+        ]
+        for note in notes:
+            NoteService.update_note(
+                test_db,
+                note_id=note.id,
+                user_id=test_user.id,
+                update_data=NoteUpdateSchema(is_pinned=True),
+            )
+
+        reordered = NoteService.reorder_pinned_notes(
+            test_db,
+            user_id=test_user.id,
+            note_ids=[notes[0].id, notes[1].id],
+        )
+
+        assert reordered is not None
+        assert [note.id for note in reordered] == [notes[0].id, notes[1].id]
+        assert [note.pin_index for note in reordered] == [0, 1]
 
     def test_mark_note_as_deleted(self, test_db: Session, test_user):
         root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)

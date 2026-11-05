@@ -24,6 +24,7 @@ class NoteMetaSchema(BaseModel):
     title: str
     updated_dt: dt.datetime
     is_pinned: bool
+    pin_index: int | None = None
 
     class Config:
         from_attributes = True
@@ -45,3 +46,7 @@ class NoteSearchResultSchema(NoteMetaSchema):
 
     class Config:
         from_attributes = True
+
+
+class PinnedNotesReorderSchema(BaseModel):
+    note_ids: list[int]

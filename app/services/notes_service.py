@@ -6,6 +6,7 @@ from sqlalchemy import case, func, literal, or_
 from sqlalchemy.orm import Session
 
 from app.const.notes import NOTE_BODY_ALLOWED_ATTRIBUTES, NOTE_BODY_ALLOWED_TAGS, NOTE_BODY_ALLOWED_PROTOCOLS
+from app.core.index_utils import set_sequential_indexes
 from app.models.notes import Note
 from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.services.base_service import BaseService
@@ -135,7 +136,7 @@ class NoteService(BaseService[Note]):
         if data.get('folder_id') is None:
             root_folder = NotesFolderService.get_root_folder(db, user_id)
             data['folder_id'] = root_folder.id
-            
+
         db_note = Note(user_id=user_id, **data)
         db.add(db_note)
         db.commit()
@@ -147,7 +148,18 @@ class NoteService(BaseService[Note]):
         db_note = cls.get_note(db, note_id, user_id)
         if not db_note:
             return None
+
         update_data_dict = update_data.model_dump(exclude_unset=True)
+        if update_data_dict.get('is_pinned') is True and not db_note.is_pinned:
+            pinned_notes = cls.get_base_query(db, user_id=user_id).filter(
+                Note.is_pinned.is_(True),
+            ).order_by(
+                Note.pin_index.asc().nulls_last(),
+                Note.updated_dt.desc(),
+            ).all()
+            set_sequential_indexes([db_note, *pinned_notes], index_field='pin_index')
+        elif update_data_dict.get('is_pinned') is False:
+            db_note.pin_index = None
         if 'body' in update_data_dict:
             update_data_dict['body'] = cls._clean_html(update_data_dict['body']) if update_data_dict['body'] else ''
             update_data_dict['body_plain_text'] = cls.extract_plain_text(update_data_dict['body'])
@@ -158,6 +170,29 @@ class NoteService(BaseService[Note]):
 
         db.refresh(db_note)
         return db_note
+
+    @classmethod
+    def reorder_pinned_notes(cls, db: Session, user_id: int, note_ids: list[int]) -> list[Note] | None:
+        if len(note_ids) != len(set(note_ids)):
+            return None
+
+        notes = (
+            cls.get_base_query(db, user_id=user_id)
+            .filter(
+                Note.id.in_(note_ids),
+                Note.is_pinned.is_(True),
+            )
+            .all()
+        )
+        notes_by_id = {note.id: note for note in notes}
+        if len(notes_by_id) != len(note_ids):
+            return None
+
+        ordered_notes = [notes_by_id[note_id] for note_id in note_ids]
+        set_sequential_indexes(ordered_notes, index_field='pin_index')
+
+        db.commit()
+        return ordered_notes
 
     @classmethod
     def delete_note(cls, db: Session, note_id: int, user_id: int) -> bool:

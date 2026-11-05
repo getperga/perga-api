@@ -49,10 +49,13 @@ class Note(BaseModel):
 
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     folder_id = Column(Integer, ForeignKey('notes_folders.id'), nullable=False, index=True)
+
     title = Column(String(length=256), nullable=False, default='')
-    body = Column(Text, nullable=False, default='')
+    body = Column(Text, nullable=False, default='')  # html
     body_plain_text = Column(Text, nullable=False, default='')
+
     is_pinned = Column(Boolean, nullable=False, default=False)
+    pin_index = Column(Integer, nullable=True)
 
     # English full-text search with title matches weighted above body matches.
     search_vector = deferred(

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.const.planner import PlannerItemState
 from app.core.db_utils import atomic_transaction, TransactionRollback
+from app.core.index_utils import set_sequential_indexes
 from app.models.planner import PlannerAgendaItem
 from app.schemas.planner_agenda import PlannerAgendaItemCreateSchema, PlannerAgendaItemUpdateSchema
 from app.services.base_service import BaseService
@@ -86,12 +87,11 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
     def reorder_agenda_items(cls, db: Session, ordered_item_ids: list[int], user_id: int) -> bool:
         try:
             with atomic_transaction(db):
-                new_index = 0
-                for item_id in ordered_item_ids:
-                    db_item = cls.get_agenda_item(db, item_id, user_id)
-                    if db_item:
-                        db_item.index = new_index
-                    new_index += 1
+                ordered_items = [
+                    db_item for item_id in ordered_item_ids
+                    if (db_item := cls.get_agenda_item(db, item_id, user_id)) is not None
+                ]
+                set_sequential_indexes(ordered_items)
         except TransactionRollback as e:
             logger.warning(f'reorder_items: {str(e)}')
             return False
@@ -175,8 +175,7 @@ class PlannerAgendaItemService(BaseService[PlannerAgendaItem]):
                 dropped_items = [item for item in items if item.state == PlannerItemState.DROPPED]
                 todo_items = [item for item in items if item.state == PlannerItemState.TODO]
 
-                for index, item in enumerate(completed_items + snoozed_items + dropped_items + todo_items):
-                    item.index = index
+                set_sequential_indexes(completed_items + snoozed_items + dropped_items + todo_items)
         except TransactionRollback as e:
             logger.warning(f'sort_items_by_state: {str(e)}')
             return False
