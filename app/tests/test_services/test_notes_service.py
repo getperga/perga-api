@@ -54,6 +54,7 @@ class TestNoteService:
         )
         assert pinned is not None
         assert pinned.is_pinned is True
+        assert pinned.pin_index == 0
 
         unpinned = NoteService.update_note(
             test_db,
@@ -63,6 +64,36 @@ class TestNoteService:
         )
         assert unpinned is not None
         assert unpinned.is_pinned is False
+        assert unpinned.pin_index is None
+
+    def test_reorder_pinned_notes(self, test_db: Session, test_user):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+
+        notes = [
+            NoteService.create_note(
+                test_db,
+                user_id=test_user.id,
+                create_data=NoteCreateSchema(title=f'Pinned {index}', folder_id=root_folder.id),
+            )
+            for index in range(2)
+        ]
+        for note in notes:
+            NoteService.update_note(
+                test_db,
+                note_id=note.id,
+                user_id=test_user.id,
+                update_data=NoteUpdateSchema(is_pinned=True),
+            )
+
+        reordered = NoteService.reorder_pinned_notes(
+            test_db,
+            user_id=test_user.id,
+            note_ids=[notes[0].id, notes[1].id],
+        )
+
+        assert reordered is not None
+        assert [note.id for note in reordered] == [notes[0].id, notes[1].id]
+        assert [note.pin_index for note in reordered] == [0, 1]
 
     def test_mark_note_as_deleted(self, test_db: Session, test_user):
         root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
@@ -142,3 +173,79 @@ class TestNoteService:
 
         results = NoteService.search_notes(test_db, user_id=test_user.id, query='nonexistentword')
         assert results == []
+
+    def test_search_notes_supports_english_stemming_and_prefixes(self, test_db: Session, test_user):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+        NoteService.create_note(
+            test_db,
+            user_id=test_user.id,
+            create_data=NoteCreateSchema(
+                title='Weekly meeting',
+                body='<p>The team planned the launch</p>',
+                folder_id=root_folder.id,
+            ),
+        )
+
+        stemming_results = NoteService.search_notes(test_db, user_id=test_user.id, query='planning')
+        assert [note.title for note in stemming_results] == ['Weekly meeting']
+        assert stemming_results[0].matched_in_title is False
+        assert stemming_results[0].matched_in_body is True
+        assert stemming_results[0].match_kind == 'exact'
+        assert stemming_results[0].find_query is None
+
+        prefix_results = NoteService.search_notes(test_db, user_id=test_user.id, query='wee')
+        assert [note.title for note in prefix_results] == ['Weekly meeting']
+        assert prefix_results[0].matched_in_title is True
+        assert prefix_results[0].matched_in_body is False
+        assert prefix_results[0].match_kind == 'prefix'
+
+    def test_search_notes_supports_title_typos(self, test_db: Session, test_user):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+        NoteService.create_note(
+            test_db,
+            user_id=test_user.id,
+            create_data=NoteCreateSchema(
+                title='Project roadmap',
+                body='<p>Launch schedule</p>',
+                folder_id=root_folder.id,
+            ),
+        )
+
+        results = NoteService.search_notes(test_db, user_id=test_user.id, query='roadmp')
+
+        assert [note.title for note in results] == ['Project roadmap']
+        assert results[0].matched_in_title is True
+        assert results[0].matched_in_body is False
+        assert results[0].match_kind == 'fuzzy'
+
+    def test_search_notes_ranks_title_above_body_and_returns_literal_find_query(
+        self,
+        test_db: Session,
+        test_user,
+    ):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+        NoteService.create_note(
+            test_db,
+            user_id=test_user.id,
+            create_data=NoteCreateSchema(
+                title='Roadmap',
+                body='<p>Milestones</p>',
+                folder_id=root_folder.id,
+            ),
+        )
+        NoteService.create_note(
+            test_db,
+            user_id=test_user.id,
+            create_data=NoteCreateSchema(
+                title='Meeting notes',
+                body='<p>Discuss the roadmap tomorrow</p>',
+                folder_id=root_folder.id,
+            ),
+        )
+
+        results = NoteService.search_notes(test_db, user_id=test_user.id, query='roadmap')
+
+        assert [note.title for note in results] == ['Roadmap', 'Meeting notes']
+        assert results[0].find_query is None
+        assert results[1].matched_in_body is True
+        assert results[1].find_query == 'roadmap'

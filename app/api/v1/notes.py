@@ -1,8 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.notes import NoteSchema, NoteCreateSchema, NoteUpdateSchema, NoteSearchResultSchema
+from app.schemas.notes import (
+    NoteSchema,
+    NoteCreateSchema,
+    NoteUpdateSchema,
+    NoteSearchResultSchema,
+    PinnedNotesReorderSchema,
+)
 from app.schemas.user import UserSchema
 from app.services.auth_service import AuthService
 from app.services.notes_service import NoteService
@@ -22,7 +28,7 @@ def create_note(
 
 @router.get("/search/", response_model=list[NoteSearchResultSchema])
 def search_notes(
-    query: str,
+    query: str = Query(min_length=1, max_length=200),
     db: Session = Depends(get_db),
     current_user: UserSchema = Depends(AuthService.get_current_user)
 ):
@@ -52,3 +58,15 @@ def update_note(
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     return note
+
+
+@router.post('/pinned/reorder/', response_model=list[NoteSchema])
+def reorder_pinned_notes(
+    request_data: PinnedNotesReorderSchema,
+    db: Session = Depends(get_db),
+    current_user: UserSchema = Depends(AuthService.get_current_user),
+):
+    notes = NoteService.reorder_pinned_notes(db, user_id=current_user.id, note_ids=request_data.note_ids)
+    if notes is None:
+        raise HTTPException(status_code=400, detail='Pinned notes list is invalid')
+    return notes

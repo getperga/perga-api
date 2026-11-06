@@ -1,9 +1,12 @@
+import re
+
 import nh3
 from bs4 import BeautifulSoup
-from sqlalchemy import func
+from sqlalchemy import case, func, literal, or_
 from sqlalchemy.orm import Session
 
 from app.const.notes import NOTE_BODY_ALLOWED_ATTRIBUTES, NOTE_BODY_ALLOWED_TAGS, NOTE_BODY_ALLOWED_PROTOCOLS
+from app.core.index_utils import set_sequential_indexes
 from app.models.notes import Note
 from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.services.base_service import BaseService
@@ -12,6 +15,10 @@ from app.services.notes_folders_service import NotesFolderService
 
 class NoteService(BaseService[Note]):
     model = Note
+
+    SEARCH_CONFIG = 'english'
+    MIN_FUZZY_QUERY_LENGTH = 3
+    MAX_PREFIX_TERMS = 10
 
     @staticmethod
     def _filter_html_attrs(tag: str, attr: str, value: str) -> str | None:
@@ -46,14 +53,73 @@ class NoteService(BaseService[Note]):
 
     @classmethod
     def search_notes(cls, db: Session, user_id: int, query: str, limit: int = 50) -> list[Note]:
-        """ Search notes with a postgres full-text vector query """
-        ts_query = func.websearch_to_tsquery('simple', query)
-        filtered_query = cls.get_base_query(db, user_id=user_id).filter(
-            Note.search_vector.op('@@')(ts_query)
+        """ Searches notes using exact, prefix, and fuzzy-title matches. """
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            return []
+
+        exact_query = func.websearch_to_tsquery(cls.SEARCH_CONFIG, normalized_query)
+        prefix_terms = re.findall(r'[a-z0-9]+', normalized_query)[:cls.MAX_PREFIX_TERMS]
+        prefix_query = func.to_tsquery(
+            cls.SEARCH_CONFIG,
+            ' & '.join(f'{term}:*' for term in prefix_terms),
         )
-        notes = filtered_query.order_by(
-            func.ts_rank(Note.search_vector, ts_query).desc()
+
+        title_vector = func.to_tsvector(cls.SEARCH_CONFIG, func.coalesce(Note.title, ''))
+        body_vector = func.to_tsvector(cls.SEARCH_CONFIG, func.coalesce(Note.body_plain_text, ''))
+
+        title_exact_match = title_vector.op('@@')(exact_query)
+        body_exact_match = body_vector.op('@@')(exact_query)
+        title_prefix_match = title_vector.op('@@')(prefix_query)
+        body_prefix_match = body_vector.op('@@')(prefix_query)
+        exact_search_match = Note.search_vector.op('@@')(exact_query)
+        prefix_search_match = Note.search_vector.op('@@')(prefix_query)
+        fuzzy_title_match = False
+        if len(normalized_query) >= cls.MIN_FUZZY_QUERY_LENGTH:
+            fuzzy_title_match = literal(normalized_query).op('<%')(func.lower(Note.title))
+
+        matched_in_title = or_(title_exact_match, title_prefix_match, fuzzy_title_match)
+        matched_in_body = or_(body_exact_match, body_prefix_match)
+        literal_body_match = func.strpos(func.lower(Note.body_plain_text), normalized_query) > 0
+
+        match_tier = case(
+            (title_exact_match, 5),
+            (title_prefix_match, 4),
+            (body_exact_match, 3),
+            (body_prefix_match, 2),
+            (fuzzy_title_match, 1),
+            else_=0,
+        )
+        match_kind = case(
+            (or_(title_exact_match, body_exact_match), 'exact'),
+            (or_(title_prefix_match, body_prefix_match), 'prefix'),
+            else_='fuzzy',
+        )
+        find_query = case((literal_body_match, query.strip()), else_=None)
+        search_rank = func.ts_rank_cd(Note.search_vector, exact_query)
+        title_similarity = func.word_similarity(normalized_query, func.lower(Note.title))
+
+        rows = cls.get_base_query(db, user_id=user_id).add_columns(
+            matched_in_title.label('matched_in_title'),
+            matched_in_body.label('matched_in_body'),
+            match_kind.label('match_kind'),
+            find_query.label('find_query'),
+        ).filter(
+            or_(exact_search_match, prefix_search_match, fuzzy_title_match)
+        ).order_by(
+            match_tier.desc(),
+            search_rank.desc(),
+            title_similarity.desc(),
+            Note.updated_dt.desc(),
         ).limit(limit).all()
+
+        notes = []
+        for note, title_match, body_match, kind, literal_query in rows:
+            note.matched_in_title = title_match
+            note.matched_in_body = body_match
+            note.match_kind = kind
+            note.find_query = literal_query
+            notes.append(note)
 
         folder_paths = NotesFolderService.get_folders_path_map(db, user_id)
         for note in notes:
@@ -70,7 +136,7 @@ class NoteService(BaseService[Note]):
         if data.get('folder_id') is None:
             root_folder = NotesFolderService.get_root_folder(db, user_id)
             data['folder_id'] = root_folder.id
-            
+
         db_note = Note(user_id=user_id, **data)
         db.add(db_note)
         db.commit()
@@ -82,7 +148,18 @@ class NoteService(BaseService[Note]):
         db_note = cls.get_note(db, note_id, user_id)
         if not db_note:
             return None
+
         update_data_dict = update_data.model_dump(exclude_unset=True)
+        if update_data_dict.get('is_pinned') is True and not db_note.is_pinned:
+            pinned_notes = cls.get_base_query(db, user_id=user_id).filter(
+                Note.is_pinned.is_(True),
+            ).order_by(
+                Note.pin_index.asc().nulls_last(),
+                Note.updated_dt.desc(),
+            ).all()
+            set_sequential_indexes([db_note, *pinned_notes], index_field='pin_index')
+        elif update_data_dict.get('is_pinned') is False:
+            db_note.pin_index = None
         if 'body' in update_data_dict:
             update_data_dict['body'] = cls._clean_html(update_data_dict['body']) if update_data_dict['body'] else ''
             update_data_dict['body_plain_text'] = cls.extract_plain_text(update_data_dict['body'])
@@ -93,6 +170,29 @@ class NoteService(BaseService[Note]):
 
         db.refresh(db_note)
         return db_note
+
+    @classmethod
+    def reorder_pinned_notes(cls, db: Session, user_id: int, note_ids: list[int]) -> list[Note] | None:
+        if len(note_ids) != len(set(note_ids)):
+            return None
+
+        notes = (
+            cls.get_base_query(db, user_id=user_id)
+            .filter(
+                Note.id.in_(note_ids),
+                Note.is_pinned.is_(True),
+            )
+            .all()
+        )
+        notes_by_id = {note.id: note for note in notes}
+        if len(notes_by_id) != len(note_ids):
+            return None
+
+        ordered_notes = [notes_by_id[note_id] for note_id in note_ids]
+        set_sequential_indexes(ordered_notes, index_field='pin_index')
+
+        db.commit()
+        return ordered_notes
 
     @classmethod
     def delete_note(cls, db: Session, note_id: int, user_id: int) -> bool:

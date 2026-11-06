@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Computed, Integer, String, Text, ForeignKey, Index
+from sqlalchemy import Boolean, Column, Computed, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import deferred, relationship
 
@@ -49,18 +49,21 @@ class Note(BaseModel):
 
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     folder_id = Column(Integer, ForeignKey('notes_folders.id'), nullable=False, index=True)
-    title = Column(String(length=256), nullable=False, default='')
-    body = Column(Text, nullable=False, default='')
-    body_plain_text = Column(Text, nullable=False, default='')
-    is_pinned = Column(Boolean, nullable=False, default=False)
 
-    # special column for full-text search, use 'simple' without stemming/stopwords for now
-    # TODO: think about using a language-specific config later
+    title = Column(String(length=256), nullable=False, default='')
+    body = Column(Text, nullable=False, default='')  # html
+    body_plain_text = Column(Text, nullable=False, default='')
+
+    is_pinned = Column(Boolean, nullable=False, default=False)
+    pin_index = Column(Integer, nullable=True)
+
+    # English full-text search with title matches weighted above body matches.
     search_vector = deferred(
         Column(
             TSVECTOR,
             Computed(
-                "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(body_plain_text, ''))",
+                "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+                "setweight(to_tsvector('english', coalesce(body_plain_text, '')), 'B')",
                 persisted=True,
             ),
         )
@@ -72,6 +75,12 @@ class Note(BaseModel):
 
     __table_args__ = (
         Index('idx_notes_search_vector', 'search_vector', postgresql_using='gin'),
+        Index(
+            'idx_notes_title_trgm',
+            func.lower(title).label('title_lower'),
+            postgresql_using='gin',
+            postgresql_ops={'title_lower': 'gin_trgm_ops'},
+        ),
     )
 
     def __repr__(self):

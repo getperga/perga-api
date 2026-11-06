@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.4] - 2026-11-06
+
+### Changed
+
+- improved notes search
+
 ## [1.2.3] - 2026-10-23
 
 ### Added

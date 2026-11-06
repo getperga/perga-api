@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.user import User
-from app.schemas.notes import NoteCreateSchema
+from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.services.auth_utils import generate_password_hash
 from app.services.notes_folders_service import NotesFolderService
 from app.services.notes_service import NoteService
@@ -50,6 +50,42 @@ class TestNotesAPI:
         )
         assert unpin_response.status_code == 200
         assert unpin_response.json()['is_pinned'] is False
+        assert unpin_response.json()['pin_index'] is None
+
+    def test_reorder_pinned_notes(
+        self,
+        client: TestClient,
+        test_db: Session,
+        test_user,
+        auth_headers,
+    ):
+        root_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+
+        notes = [
+            NoteService.create_note(
+                test_db,
+                user_id=test_user.id,
+                create_data=NoteCreateSchema(title=f'Pinned {index}', folder_id=root_folder.id),
+            )
+            for index in range(2)
+        ]
+        for note in notes:
+            NoteService.update_note(
+                test_db,
+                note_id=note.id,
+                user_id=test_user.id,
+                update_data=NoteUpdateSchema(is_pinned=True),
+            )
+
+        response = client.post(
+            f'{settings.API_V1_STR}/notes/pinned/reorder/',
+            headers=auth_headers,
+            json={'note_ids': [notes[0].id, notes[1].id]},
+        )
+
+        assert response.status_code == 200
+        assert [note['id'] for note in response.json()] == [notes[0].id, notes[1].id]
+        assert [note['pin_index'] for note in response.json()] == [0, 1]
 
     def test_user_cannot_pin_another_users_note(
         self,

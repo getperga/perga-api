@@ -49,6 +49,10 @@ class TestNotesSearchAPI:
         assert data[0]['is_pinned'] is True
         assert 'body' not in data[0]
         assert data[0]['folders_path'] == []
+        assert data[0]['matched_in_title'] is False
+        assert data[0]['matched_in_body'] is True
+        assert data[0]['match_kind'] == 'exact'
+        assert data[0]['find_query'] == 'milk'
 
     def test_search_notes_includes_folder_path(self, client: TestClient, test_db: Session, test_user, auth_headers):
         folder1 = NotesFolderService.create_folder(

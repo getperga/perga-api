@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.const.planner import PlannerItemState
 from app.core.db_utils import atomic_transaction, TransactionRollback
+from app.core.index_utils import set_sequential_indexes
 from app.models.planner import PlannerDayItem
 from app.schemas.planner_day import PlannerDayItemCreateSchema, PlannerDayItemUpdateSchema
 from app.services.base_service import BaseService
@@ -90,15 +91,13 @@ class PlannerDayItemService(BaseService[PlannerDayItem]):
     @classmethod
     def reorder_day_items(cls, db: Session, ordered_item_ids: list[int], user_id: int) -> bool:
         """ Update day items indexes accordingly to provided ordered list """
-        new_index = 0
-
         try:
             with atomic_transaction(db):
-                for item_id in ordered_item_ids:
-                    db_item = cls.get_day_item(db, item_id, user_id)
-                    if db_item:
-                        db_item.index = new_index
-                    new_index += 1
+                ordered_items = [
+                    db_item for item_id in ordered_item_ids
+                    if (db_item := cls.get_day_item(db, item_id, user_id)) is not None
+                ]
+                set_sequential_indexes(ordered_items)
         except TransactionRollback as e:
             logger.warning(f'reorder_day_items: {str(e)}')
             return False
