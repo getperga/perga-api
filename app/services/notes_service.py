@@ -1,6 +1,5 @@
-import re
-
 import nh3
+import re
 from bs4 import BeautifulSoup
 from sqlalchemy import case, func, literal, or_
 from sqlalchemy.orm import Session
@@ -10,6 +9,7 @@ from app.core.index_utils import set_sequential_indexes
 from app.models.notes import Note
 from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.services.base_service import BaseService
+from app.services.notes_attachments_service import NotesAttachmentsService
 from app.services.notes_folders_service import NotesFolderService
 
 
@@ -139,13 +139,20 @@ class NoteService(BaseService[Note]):
 
         db_note = Note(user_id=user_id, **data)
         db.add(db_note)
+        db.flush()
+        db_note.body = cls._clean_html(NotesAttachmentsService.synchronize_body(
+            db, db_note, db_note.body or '', previous_body='',
+        ))
         db.commit()
+
         db.refresh(db_note)
         return db_note
 
     @classmethod
     def update_note(cls, db: Session, note_id: int, user_id: int, update_data: NoteUpdateSchema) -> Note | None:
-        db_note = cls.get_note(db, note_id, user_id)
+        db_note = cls.get_base_query(db, user_id=user_id).filter(
+            Note.id == note_id,
+        ).populate_existing().with_for_update().first()
         if not db_note:
             return None
 
@@ -162,6 +169,12 @@ class NoteService(BaseService[Note]):
             db_note.pin_index = None
         if 'body' in update_data_dict:
             update_data_dict['body'] = cls._clean_html(update_data_dict['body']) if update_data_dict['body'] else ''
+            NotesAttachmentsService.get_note(db, note_id, user_id, editable=True)
+            update_data_dict['body'] = cls._clean_html(NotesAttachmentsService.synchronize_body(
+                db,
+                db_note,
+                update_data_dict['body'],
+            ))
             update_data_dict['body_plain_text'] = cls.extract_plain_text(update_data_dict['body'])
 
         for field, value in update_data_dict.items():

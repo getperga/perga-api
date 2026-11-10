@@ -1,3 +1,4 @@
+import zipfile
 from fastapi import Depends, HTTPException, APIRouter, UploadFile, File, Query
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,7 @@ router = APIRouter()
 
 
 @router.post('/', response_model=NotesImportResponseSchema)
-async def import_notes(
+def import_notes(
     files: list[UploadFile] = File(...),
     folder_id: int | None = Query(None),
     db: Session = Depends(get_db),
@@ -43,7 +44,7 @@ async def import_notes(
     imported_notes = []
     total_content_size = 0
     for file in files:
-        content = await file.read()
+        content = file.file.read(IMPORT_SIZE_LIMIT + 1)
         total_content_size += len(content)
 
         # validate actual content size
@@ -53,15 +54,18 @@ async def import_notes(
                 detail=f'Import content size is too large. Max total size is {IMPORT_SIZE_LIMIT_MB}MB'
             )
 
-        filename = file.filename
+        filename = file.filename or ''
         
         if filename.lower().endswith('.zip'):
-            notes = NotesImportService.import_zip(
-                db,
-                user_id=current_user.id,
-                zip_content=content,
-                folder_id=folder_id
-            )
+            try:
+                notes = NotesImportService.import_zip(
+                    db,
+                    user_id=current_user.id,
+                    zip_content=content,
+                    folder_id=folder_id
+                )
+            except (zipfile.BadZipFile, NotImplementedError, EOFError) as exc:
+                raise HTTPException(status_code=422, detail='Invalid or unsupported ZIP archive') from exc
             imported_notes.extend(notes)
         else:
             note = NotesImportService.import_file(

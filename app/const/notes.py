@@ -49,7 +49,7 @@ NOTE_BODY_ALLOWED_TAGS = {
 }
 NOTE_BODY_ALLOWED_ATTRIBUTES = {
     'a': {'href', 'target', 'title'},
-    'img': {'src', 'alt', 'title', 'width', 'height'},
+    'img': {'src', 'alt', 'title', 'width', 'height', 'data-attachment-id'},
     'ol': {'start', 'type'},
     'ul': {'data-type'},
     'li': {'data-type', 'data-checked'},
