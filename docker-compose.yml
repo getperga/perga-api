@@ -20,6 +20,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    volumes:
+      - attachments_data:/app/data/attachments
     environment:
       - POSTGRES_HOST=db
     depends_on:
@@ -51,3 +53,4 @@ services:
 
 volumes:
   postgres_data:
+  attachments_data:

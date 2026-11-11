@@ -2,20 +2,32 @@ import html
 import io
 import markdown
 import os
+import posixpath
 import re
 import zipfile
 from bs4 import BeautifulSoup
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from urllib.parse import unquote, urlsplit
 
+from app.const.notes import IMPORT_SIZE_LIMIT
+from app.core.config import settings
+from app.core.file_storage import get_file_storage
 from app.models.notes import Note
-from app.schemas.notes import NoteCreateSchema
+from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema
 from app.services.notes_service import NoteService
+from app.services.notes_attachments_service import NotesAttachmentsService, attachment_url
 from app.services.notes_folders_service import NotesFolderService
 
 
 class NotesImportService:
     IGNORE_FOLDER_NAMES = ('__macosx', '.ds_store', 'thumbs.db', 'desktop.ini')
+    SUPPORTED_NOTE_EXTENSIONS = ('.md', '.html', '.htm', '.txt')
+    ARCHIVE_ASSETS_FOLDER_NAME = 'assets'
+    MAX_ARCHIVE_ENTRIES = 1000
+    MAX_ARCHIVE_EXPANDED_SIZE = IMPORT_SIZE_LIMIT * 10
+    ZIP_ENCRYPTED_FLAG = 1
 
     @classmethod
     def _parse_html(cls, content: str, default_title: str) -> tuple[str, str]:
@@ -113,7 +125,8 @@ class NotesImportService:
 
     @classmethod
     def import_file(
-        cls, db: Session, user_id: int, filename: str, content: bytes, folder_id: int
+        cls, db: Session, user_id: int, filename: str, content: bytes, folder_id: int,
+        *, archive: zipfile.ZipFile | None = None, archive_path: str = '',
     ) -> Note | None:
         """ Import a single file as a note. """
         default_title = os.path.splitext(filename)[0]
@@ -135,11 +148,99 @@ class NotesImportService:
         else:
             return None
 
-        return NoteService.create_note(
-            db,
-            user_id,
-            NoteCreateSchema(folder_id=folder_id, title=title, body=body)
-        )
+        soup = BeautifulSoup(body, 'html.parser')
+        images = soup.find_all('img')
+        if not images:
+            return NoteService.create_note(db, user_id, NoteCreateSchema(folder_id=folder_id, title=title, body=body))
+        if archive is None:
+            raise HTTPException(422, 'Images must be imported in a ZIP archive with their assets')
+        prepared = cls._prepare_archive_images(soup, archive, archive_path)
+
+        return cls._create_note_with_images(db, user_id, folder_id, title, soup, prepared)
+
+    @classmethod
+    def _resolve_archive_image_path(cls, source_url: str, archive_path: str) -> str:
+        """ Resolves a relative image path within the ZIP root. """
+        try:
+            source = urlsplit(source_url)
+        except ValueError as exc:
+            raise HTTPException(422, 'Invalid image URL') from exc
+
+        if source.scheme or source.netloc or not source.path or source.query or source.fragment:
+            raise HTTPException(422, 'Only relative image paths inside the ZIP are supported')
+
+        decoded_path = unquote(source.path)
+        if decoded_path.startswith('/') or '\\' in decoded_path:
+            raise HTTPException(422, 'Invalid image path')
+
+        path = posixpath.normpath(posixpath.join(posixpath.dirname(archive_path), decoded_path))
+        if path == '..' or path.startswith('../'):
+            raise HTTPException(422, 'Image path escapes ZIP root')
+
+        return path
+
+    @classmethod
+    def _read_archive_image(cls, archive: zipfile.ZipFile, path: str) -> bytes:
+        """ Reads and validates an image from the archive before creating a note. """
+        try:
+            info = next(item for item in archive.infolist()
+                        if cls._check_zipped_filename(item.filename, item) == path)
+        except StopIteration as exc:
+            raise HTTPException(422, 'Image is missing from the ZIP archive') from exc
+
+        if info.file_size > settings.ATTACHMENTS_MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(413, 'Imported image exceeds file size limit')
+
+        try:
+            data = archive.read(info)
+        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError) as exc:
+            raise HTTPException(422, 'Cannot read image from ZIP archive') from exc
+
+        NotesAttachmentsService.validate_image(io.BytesIO(data))
+        return data
+
+    @classmethod
+    def _prepare_archive_images(
+        cls, soup: BeautifulSoup, archive: zipfile.ZipFile, archive_path: str,
+    ) -> dict[str, bytes]:
+        """ Validates image references and collect each archive asset once. """
+        prepared = {}
+        for image in soup.find_all('img'):
+            path = cls._resolve_archive_image_path(str(image.get('src', '')), archive_path)
+            if path not in prepared:
+                prepared[path] = cls._read_archive_image(archive, path)
+            image['src'] = path
+            image.attrs.pop('data-attachment-id', None)
+        return prepared
+
+    @classmethod
+    def _create_note_with_images(
+        cls, db: Session, user_id: int, folder_id: int, title: str,
+        soup: BeautifulSoup, prepared: dict[str, bytes],
+    ) -> Note | None:
+        """ Creates a note with uploaded assets and mark it deleted if import fails. """
+        note = NoteService.create_note(db, user_id, NoteCreateSchema(folder_id=folder_id, title=title))
+        note_id = note.id
+
+        try:
+            uploaded = {}
+            for path, data in prepared.items():
+                uploaded[path] = NotesAttachmentsService.upload(
+                    db, get_file_storage(), note.id, user_id, io.BytesIO(data), posixpath.basename(path),
+                )
+            for image in soup.find_all('img'):
+                attachment = uploaded[image['src']]
+                image['data-attachment-id'] = str(attachment.id)
+                image['src'] = attachment_url(note.id, attachment.id)
+            note = NoteService.update_note(db, note.id, user_id, NoteUpdateSchema(body=str(soup)))
+        except Exception:
+            db.rollback()
+            note = db.query(Note).filter(Note.id == note_id).with_for_update().one()
+            note.mark_as_deleted()
+            db.commit()
+            raise
+
+        return note
 
     @classmethod
     def _is_special_path(cls, path: str) -> bool:
@@ -174,74 +275,107 @@ class NotesImportService:
         return filename
 
     @classmethod
+    def _validate_archive(cls, entries: list[zipfile.ZipInfo]) -> None:
+        """ Checks archive limits, encryption and unique safe entry paths. """
+        if (
+            len(entries) > cls.MAX_ARCHIVE_ENTRIES or
+            sum(item.file_size for item in entries) > cls.MAX_ARCHIVE_EXPANDED_SIZE
+        ):
+            raise HTTPException(413, 'ZIP exceeds expanded size or entry count limit')
+
+        names = set()
+        for item in entries:
+            if item.flag_bits & cls.ZIP_ENCRYPTED_FLAG:
+                raise HTTPException(422, 'Encrypted ZIP archives are not supported')
+
+            path = cls._check_zipped_filename(item.filename, item)
+            if (
+                path.startswith('/')
+                or '\\' in path
+                or '..' in path.split('/')
+                or ':' in path.split('/')[0]
+                or path in names
+                or path.rstrip('/') != posixpath.normpath(path)
+            ):
+                raise HTTPException(422, 'Invalid or duplicate ZIP path')
+
+            names.add(path)
+
+    @classmethod
+    def _should_skip_archive_entry(cls, filename: str, file_info: zipfile.ZipInfo) -> bool:
+        """ Checks special paths, asset directories and unsupported note files. """
+        if cls._is_special_path(filename):
+            return True
+
+        if file_info.is_dir():
+            return filename.rstrip('/').split('/')[-1] == cls.ARCHIVE_ASSETS_FOLDER_NAME
+
+        return os.path.splitext(filename)[1].lower() not in cls.SUPPORTED_NOTE_EXTENSIONS
+
+    @classmethod
+    def _ensure_archive_folder(
+        cls, db: Session, user_id: int, folder_path: str, root_folder_id: int,
+        created_folders_map: dict[str, int],
+    ) -> int:
+        """ Creates missing folders along an archive path and return the final folder ID. """
+        current_path = ''
+        current_parent_id = root_folder_id
+
+        for part in folder_path.strip('/').split('/'):
+            if not part:
+                continue
+            full_part_path = f'{current_path}/{part}'.strip('/')
+            if full_part_path not in created_folders_map:
+                new_folder = NotesFolderService.create_folder(
+                    db,
+                    user_id,
+                    NotesFolderCreateSchema(parent_id=current_parent_id, name=part),
+                )
+                created_folders_map[full_part_path] = new_folder.id
+            current_path = full_part_path
+            current_parent_id = created_folders_map[full_part_path]
+
+        return current_parent_id
+
+    @classmethod
+    def _import_archive_note(
+        cls, db: Session, user_id: int, archive: zipfile.ZipFile, file_info: zipfile.ZipInfo,
+        filename: str, folder_id: int,
+    ) -> Note | None:
+        """ Reads a note entry and import it with access to the archive assets. """
+        with archive.open(file_info) as file:
+            content = file.read()
+            note = cls.import_file(
+                db, user_id, posixpath.basename(filename), content, folder_id,
+                archive=archive, archive_path=filename,
+            )
+        return note
+
+    @classmethod
     def import_zip(
         cls, db: Session, user_id: int, zip_content: bytes, folder_id: int
     ) -> list[Note]:
         imported_notes = []
+        created_folders_map = {'': folder_id}
 
-        zip_buffer = io.BytesIO(zip_content)
-        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
-            # keep track of created folders to reuse them: { <path>: <folder_id> }
-            created_folders_map = {'': folder_id}
-            
-            for file_info in zip_ref.infolist():
+        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as archive:
+            entries = archive.infolist()
+            cls._validate_archive(entries)
+
+            for file_info in entries:
                 filename = cls._check_zipped_filename(file_info.filename, file_info)
-
-                # skip special folders and files
-                if cls._is_special_path(filename):
+                if cls._should_skip_archive_entry(filename, file_info):
                     continue
 
+                folder_path = filename if file_info.is_dir() else posixpath.dirname(filename)
+                target_folder_id = cls._ensure_archive_folder(
+                    db, user_id, folder_path, folder_id, created_folders_map,
+                )
                 if file_info.is_dir():
-                    path_parts = [part for part in filename.strip('/').split('/') if part]
-                    current_path = ''
-                    current_parent_id = folder_id
-                    
-                    for part in path_parts:
-                        full_part_path = f'{current_path}/{part}'.strip('/')
-                        if full_part_path not in created_folders_map:
-                            new_folder = NotesFolderService.create_folder(
-                                db,
-                                user_id,
-                                NotesFolderCreateSchema(parent_id=current_parent_id, name=part)
-                            )
-                            created_folders_map[full_part_path] = new_folder.id
-                        
-                        current_path = full_part_path
-                        current_parent_id = created_folders_map[full_part_path]
                     continue
-                
-                # Handle file entry
-                path_parts = filename.split('/')
-                
-                if len(path_parts) > 1:
-                    # File is in a subfolder
-                    base_filename = path_parts[-1]
-                    
-                    # Ensure all parent folders exist
-                    current_path = ''
-                    current_parent_id = folder_id
-                    for part in path_parts[:-1]:
-                        full_part_path = f'{current_path}/{part}'.strip('/')
-                        if full_part_path not in created_folders_map:
-                            new_folder = NotesFolderService.create_folder(
-                                db,
-                                user_id,
-                                NotesFolderCreateSchema(parent_id=current_parent_id, name=part)
-                            )
-                            created_folders_map[full_part_path] = new_folder.id
-                        current_path = full_part_path
-                        current_parent_id = created_folders_map[full_part_path]
-                    
-                    target_folder_id = current_parent_id
-                else:
-                    base_filename = filename
-                    target_folder_id = folder_id
-                
-                # import the file
-                with zip_ref.open(file_info) as f:
-                    content = f.read()
-                    note = cls.import_file(db, user_id, base_filename, content, target_folder_id)
-                    if note:
-                        imported_notes.append(note)
-                        
+
+                note = cls._import_archive_note(db, user_id, archive, file_info, filename, target_folder_id)
+                if note:
+                    imported_notes.append(note)
+
         return imported_notes

@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, Column, Computed, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger, Boolean, CheckConstraint, Column, Computed, ForeignKey, Index, Integer, String, Text, func,
+)
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import deferred, relationship
 
@@ -8,6 +10,7 @@ from app.models.base import BaseModel
 __all__ = (
     'NotesFolder',
     'Note',
+    'NotesAttachment',
 )
 
 
@@ -85,3 +88,21 @@ class Note(BaseModel):
 
     def __repr__(self):
         return f"<Note(id={self.id}, title={self.title!r}, user_id={self.user_id})>"
+
+
+class NotesAttachment(BaseModel):
+    __tablename__ = 'notes_attachments'
+
+    note_id = Column(Integer, ForeignKey('notes.id'), nullable=False, index=True)
+    storage_key = Column(String(256), nullable=False, unique=True)
+    original_filename = Column(String(256), nullable=False)
+    content_type = Column(String(64), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, default='uploading')
+
+    __table_args__ = (
+        CheckConstraint("status IN ('uploading', 'ready')", name='ck_notes_attachments_status'),
+        Index('ix_notes_attachments_cleanup', 'is_deleted', 'deleted_dt'),
+    )

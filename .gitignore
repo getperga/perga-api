@@ -107,3 +107,4 @@ ENV/
 
 # Docker
 .docker/
+data/attachments/

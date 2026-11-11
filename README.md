@@ -11,6 +11,7 @@ The backend for [Perga](https://getperga.me/) — a personal workspace for notes
 - Daily planning
 - Monthly and custom agendas
 - Notes management with folders, export and import
+- Notes attachments with local or S3-compatible storage
 - Full-text note search
 - User authentication, including Google sign-in
 

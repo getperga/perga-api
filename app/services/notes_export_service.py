@@ -1,15 +1,22 @@
 import io
+import html
+import posixpath
 import re
 import unicodedata
 import urllib.parse
 import zipfile
+from bs4 import BeautifulSoup
+from fastapi import HTTPException
 from markdownify import markdownify
+from sqlalchemy.orm import Session, object_session
 from weasyprint import HTML
-from sqlalchemy.orm import Session
+from weasyprint.urls import URLFetcher, URLFetcherResponse
 
 from app.const.notes import ExportType, EXPORT_TYPE_EXTENSION_MAP
+from app.core.file_storage import get_file_storage
 from app.models.notes import Note, NotesFolder
 from app.services.notes_service import NoteService
+from app.services.notes_attachments_service import NotesAttachmentsService
 from app.services.notes_folders_service import NotesFolderService
 
 
@@ -22,7 +29,7 @@ class NotesExportService:
     WHITELIST_FILENAME_CHARS_RE = re.compile(r'[^A-Za-z0-9._()\- \u0400-\u04FF]')
 
     @classmethod
-    def _generate_pdf_content(cls, title: str, body: str) -> bytes:
+    def _generate_pdf_content(cls, title: str, body: str, assets: dict | None = None) -> bytes:
         """ Generate PDF content from note body HTML. """
         html_content = f"""
             <html>
@@ -34,12 +41,20 @@ class NotesExportService:
                 </style>
             </head>
             <body>
-                <h1>{title}</h1>
+                <h1>{html.escape(title)}</h1>
                 {body}
             </body>
             </html>
         """
-        return HTML(string=html_content).write_pdf()
+
+        class PrivateAssetFetcher(URLFetcher):
+            def fetch(self, url, headers=None):
+                if not assets or url not in assets:
+                    raise ValueError('External resources are disabled in PDF exports')
+                content, content_type = assets[url]
+                return URLFetcherResponse(url, content, {'Content-Type': content_type})
+
+        return HTML(string=html_content, url_fetcher=PrivateAssetFetcher()).write_pdf()
 
     @classmethod
     def _preprocess_tiptap_task_lists(cls, body: str) -> str:
@@ -74,21 +89,57 @@ class NotesExportService:
         return body
 
     @classmethod
-    def _get_note_content(cls, note: Note, export_type: ExportType) -> str | bytes:
+    def _get_note_content(
+        cls, note: Note, export_type: ExportType, *, body: str | None = None, assets: dict | None = None
+    ) -> str | bytes:
         """ Notes body stored as HTML. Converts it to a specified format if needed and adds a title. """
-        body = cls._preprocess_tiptap_task_lists(note.body)
+        body = cls._preprocess_tiptap_task_lists(note.body if body is None else body)
 
         note_content: str | bytes
         if export_type == ExportType.MARKDOWN:
             title = f"# {note.title}\n\n"
             note_content = title + markdownify(body)
         elif export_type == ExportType.PDF:
-            note_content = cls._generate_pdf_content(note.title, body)
+            note_content = cls._generate_pdf_content(note.title, body, assets)
         else:
-            title = f"<h1>{note.title}</h1>"
+            title = f"<h1>{html.escape(note.title)}</h1>"
             note_content = title + body
 
         return note_content
+
+    @classmethod
+    def _attachment_content(cls, note: Note, export_type: ExportType) -> tuple[str | bytes, dict[str, bytes]]:
+        soup = BeautifulSoup(note.body, 'html.parser')
+        db = object_session(note)
+
+        files = {}
+        pdf_assets = {}
+        for image in soup.find_all('img', attrs={'data-attachment-id': True}):
+            try:
+                attachment_id = int(image['data-attachment-id'])
+            except ValueError as exc:
+                raise HTTPException(422, 'Invalid stored attachment reference') from exc
+
+            attachment = NotesAttachmentsService.get_attachment(db, note.id, attachment_id, note.user_id)
+            extension = attachment.storage_key.rsplit('.', 1)[-1]
+            path = f'assets/{attachment.id}.{extension}'
+            if path not in files:
+                stream = get_file_storage().open(attachment.storage_key)
+                try:
+                    files[path] = stream.read()
+                finally:
+                    stream.close()
+
+            image.attrs.pop('data-attachment-id', None)
+            if export_type == ExportType.PDF:
+                url = f'https://perga.invalid/attachments/{attachment.id}'
+                pdf_assets[url] = (files[path], attachment.content_type)
+                image['src'] = url
+            else:
+                image['src'] = path
+
+        body = str(soup) if files else note.body
+        return cls._get_note_content(note, export_type, body=body, assets=pdf_assets), files
 
     @classmethod
     def _generate_export_filename(cls, note: Note, export_type: ExportType) -> str:
@@ -141,7 +192,7 @@ class NotesExportService:
                     note = item
                     rel_path = ''
 
-                content = cls._get_note_content(note, export_type)
+                content, assets = cls._attachment_content(note, export_type)
                 base_filename = cls._generate_export_filename(note, export_type)
                 
                 if rel_path:
@@ -156,6 +207,12 @@ class NotesExportService:
                     counter += 1
 
                 used_filenames.add(filename)
+                if export_type != ExportType.PDF:
+                    for asset_path, asset_content in assets.items():
+                        full_path = posixpath.join(rel_path.strip('/'), asset_path)
+                        if full_path not in used_filenames:
+                            zip_file.writestr(full_path, asset_content)
+                            used_filenames.add(full_path)
                 zip_file.writestr(filename, content)
 
         zip_buffer.seek(0)
@@ -170,7 +227,10 @@ class NotesExportService:
         
         for subfolder in folder.subfolders:
             if not subfolder.is_deleted:
-                new_path = f"{current_path}/{subfolder.name}".strip('/')
+                name = cls.WHITELIST_FILENAME_CHARS_RE.sub('', subfolder.name).strip(' .')
+                if not name or name.upper() in cls.WINDOWS_RESERVED_FILENAMES:
+                    name = f'folder_{subfolder.id}'
+                new_path = f"{current_path}/{name}".strip('/')
                 items.extend(cls._get_notes_with_paths(subfolder, new_path))
         return items
 
@@ -190,8 +250,12 @@ class NotesExportService:
         if not note:
             return None, None
 
-        content = cls._get_note_content(note, export_type)
+        content, assets = cls._attachment_content(note, export_type)
         filename = cls._generate_export_filename(note, export_type)
+        if assets and export_type != ExportType.PDF:
+            archive = cls._create_zip_archive([note], export_type)
+            return archive.getvalue(), filename.rsplit('.', 1)[0] + '.zip'
+
         return content, filename
 
     @classmethod

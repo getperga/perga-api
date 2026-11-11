@@ -34,7 +34,7 @@ def notes_export(
         headers = NotesExportService.generate_export_headers(filename)
         return Response(
             content=content,
-            media_type=media_type,
+            media_type='application/zip' if filename.endswith('.zip') else media_type,
             headers=headers
         )
     elif export_target == ExportTarget.FOLDER_NOTES and export_target_id:
