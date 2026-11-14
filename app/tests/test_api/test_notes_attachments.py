@@ -49,12 +49,52 @@ def upload(client, note, auth_headers, image_bytes):
                        files={'file': ('../../screenshot.png', image_bytes, 'text/plain')})
 
 
+@pytest.mark.parametrize('export_type', ['html', 'markdown'])
+def test_file_attachment_round_trip(client, test_db, test_user, note, auth_headers, attachment_storage, export_type):
+    source = b'File contents'
+    response = client.post(f'/api/v1/notes/{note.id}/attachments/', headers=auth_headers,
+                           files={'file': ('file name.txt', source, 'text/html')})
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data['attachment_type'] == 'file'
+    assert data['width'] is None and data['height'] is None
+    attachment = test_db.get(NotesAttachment, data['id'])
+    assert attachment.preview_storage_key is None
+
+    body = f'<a data-attachment-id="{data["id"]}">file name.txt</a>'
+    saved = client.patch(f'/api/v1/notes/{note.id}/', headers=auth_headers, json={'body': body})
+    assert saved.status_code == 200, saved.text
+    assert f'href="{data["url"]}"' in saved.json()['body']
+    assert test_db.get(NotesAttachment, data['id']).is_deleted is False
+
+    downloaded = client.get(data['url'], headers=auth_headers, params={'preview': 'true'})
+    assert downloaded.content == source
+    assert downloaded.headers['content-type'] == 'application/octet-stream'
+    assert downloaded.headers['content-disposition'] == "attachment; filename*=UTF-8''file%20name.txt"
+    invalid_body = f'<img data-attachment-id="{data["id"]}">'
+    assert client.patch(f'/api/v1/notes/{note.id}/', headers=auth_headers,
+                        json={'body': invalid_body}).status_code == 422
+
+    exported = client.get('/api/v1/notes/export/', headers=auth_headers,
+                          params={'export_type': export_type, 'export_target': 'single_note',
+                                  'export_target_id': note.id})
+    assert exported.status_code == 200, exported.text
+    imported = NotesImportService.import_zip(test_db, test_user.id, exported.content, note.folder_id)
+    assert len(imported) == 1
+    link = BeautifulSoup(imported[0].body, 'html.parser').find('a')
+    assert link.text == 'file name.txt'
+    assert link['data-attachment-id'] != str(data['id'])
+    assert client.get(link['href'], headers=auth_headers).content == source
+
+
 def test_upload_canonicalize_download_and_usage(client, test_db, note, auth_headers, attachment_storage, image_bytes):
     response = upload(client, note, auth_headers, image_bytes)
     assert response.status_code == 201, response.text
     data = response.json()
     assert isinstance(data['id'], int)
     uploaded = test_db.get(NotesAttachment, data['id'])
+    assert uploaded.preview_size_bytes is None
+    assert uploaded.preview_storage_key is None
     assert uploaded.is_deleted is True
     assert uploaded.deleted_dt is not None
     UUID(uploaded.storage_key.rsplit('/', 1)[-1].split('.')[0])
@@ -146,6 +186,53 @@ def test_storage_failure_compensated(client, test_db, note, auth_headers, attach
     monkeypatch.setattr(attachment_storage, 'put', fail)
     assert upload(client, note, auth_headers, image_bytes).status_code == 503
     assert test_db.query(NotesAttachment).count() == 0
+
+
+def test_preview_is_stored_at_upload_and_removed_at_cleanup(client, test_db, note, auth_headers, attachment_storage):
+    source = io.BytesIO()
+    Image.new('RGB', (1800, 1000), 'red').save(source, format='PNG', compress_level=0)
+    original = source.getvalue()
+    response = upload(client, note, auth_headers, original)
+    assert response.status_code == 201
+
+    data = response.json()
+    attachment = test_db.get(NotesAttachment, data['id'])
+    preview_key = attachment.preview_storage_key
+    assert preview_key is not None
+    with attachment_storage.open(preview_key) as file:
+        stored_preview = file.read()
+    assert attachment.preview_size_bytes == len(stored_preview)
+    assert client.get(data['url'], headers=auth_headers).content == original
+
+    preview = client.get(data['url'], headers=auth_headers, params={'preview': 'true'})
+    assert preview.headers['content-type'] == 'image/webp'
+    assert preview.headers['content-length'] == str(len(stored_preview))
+    assert preview.content == stored_preview
+    with Image.open(io.BytesIO(preview.content)) as image:
+        assert max(image.size) == 1600
+
+    attachment_storage.delete(preview_key)
+    assert client.get(data['url'], headers=auth_headers, params={'preview': 'true'}).content == original
+    attachment_storage.put(preview_key, io.BytesIO(stored_preview), 'image/webp')
+
+    attachment.preview_size_bytes = None
+    test_db.commit()
+    preview = client.get(data['url'], headers=auth_headers, params={'preview': 'true'})
+    assert preview.content == stored_preview
+    assert 'content-length' not in preview.headers
+
+    attachment.preview_storage_key = None
+    test_db.commit()
+    assert client.get(data['url'], headers=auth_headers, params={'preview': 'true'}).content == original
+
+    attachment.preview_storage_key = preview_key
+    original_key = attachment.storage_key
+    attachment.deleted_dt = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=30)
+    test_db.commit()
+    assert NotesAttachmentsService.cleanup(test_db, attachment_storage) == 1
+    for key in (original_key, preview_key):
+        with pytest.raises(StorageError):
+            attachment_storage.open(key)
 
 
 def test_cleanup_preserves_references_and_retries(client, test_db, note, auth_headers,
