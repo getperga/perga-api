@@ -4,8 +4,9 @@ import warnings
 from bs4 import BeautifulSoup
 from collections import Counter
 from fastapi import HTTPException
+from io import BytesIO
 from pathlib import PurePath
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from typing import BinaryIO
@@ -20,6 +21,10 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 FORMATS = {'PNG': ('image/png', 'png'), 'JPEG': ('image/jpeg', 'jpg'), 'WEBP': ('image/webp', 'webp')}
 INCOMPLETE_UPLOAD_TTL_DAYS = 1
+IMAGE_PREVIEW_MAX_EDGE = 1600
+IMAGE_PREVIEW_QUALITY = 82
+IMAGE_PREVIEW_ENCODING_METHOD = 1
+IMAGE_PREVIEW_CONTENT_TYPE = 'image/webp'
 
 
 def attachment_url(note_id: int, attachment_id: int) -> str:
@@ -27,6 +32,33 @@ def attachment_url(note_id: int, attachment_id: int) -> str:
 
 
 class NotesAttachmentsService:
+    @staticmethod
+    def generate_preview_image(stream: BinaryIO) -> bytes | None:
+        """ Creates a smaller WebP preview image from original """
+        try:
+            with Image.open(stream) as source:
+                # let JPEG decode at reduced resolution before applying EXIF orientation
+                source.draft('RGB', (IMAGE_PREVIEW_MAX_EDGE, IMAGE_PREVIEW_MAX_EDGE))
+                image = ImageOps.exif_transpose(source)
+                image.thumbnail((IMAGE_PREVIEW_MAX_EDGE, IMAGE_PREVIEW_MAX_EDGE), Image.Resampling.LANCZOS)
+                mode = 'RGBA' if image.has_transparency_data else 'RGB'
+                with BytesIO() as output:
+                    image.convert(mode).save(
+                        output, format='WEBP', quality=IMAGE_PREVIEW_QUALITY, method=IMAGE_PREVIEW_ENCODING_METHOD,
+                    )
+                    return output.getvalue()
+        except (OSError, ValueError, Image.DecompressionBombError):
+            logger.warning('Cannot generate attachment preview', exc_info=True)
+            return None
+        finally:
+            stream.seek(0)
+
+    @staticmethod
+    def delete_files(storage: FileStorage, attachment: NotesAttachment) -> None:
+        if attachment.preview_storage_key is not None:
+            storage.delete(attachment.preview_storage_key)
+        storage.delete(attachment.storage_key)
+
     @staticmethod
     def has_deleted_folder(db: Session, folder_id: int) -> bool:
         seen = set()
@@ -119,6 +151,7 @@ class NotesAttachmentsService:
         # validate note and image
         cls.get_note(db, note_id, user_id, editable=True)
         size, content_type, extension, width, height = cls.validate_image(file)
+        preview = cls.generate_preview_image(file) if max(width, height) > IMAGE_PREVIEW_MAX_EDGE else None
 
         # lock user and note, and count total attachments size
         db.query(User).filter(User.id == user_id).with_for_update().one()
@@ -132,12 +165,14 @@ class NotesAttachmentsService:
         if count >= settings.ATTACHMENTS_MAX_PER_NOTE:
             raise HTTPException(413, 'Note attachment count limit exceeded')
 
+        storage_path = f'notes/{note_id}/{uuid4()}'
         attachment = NotesAttachment(
             note_id=note_id,
-            storage_key=f'notes/{note_id}/{uuid4()}.{extension}',
-            original_filename=PurePath(filename.replace('\\', '/')).name[:256] or f'image.{extension}',
             content_type=content_type, size_bytes=size, width=width, height=height,
             status='uploading',
+            original_filename=PurePath(filename.replace('\\', '/')).name[:256] or f'image.{extension}',
+            storage_key=f'{storage_path}.{extension}',
+            preview_storage_key=f'{storage_path}-preview.webp' if preview else None,
         )
         db.add(attachment)
         db.commit()
@@ -148,6 +183,9 @@ class NotesAttachmentsService:
             cls.get_note(db, note_id, user_id, lock=True, editable=True)
             attachment = db.query(NotesAttachment).filter(NotesAttachment.id == attachment_id).with_for_update().one()
             storage.put(attachment.storage_key, file, content_type)
+            if preview is not None:
+                storage.put(attachment.preview_storage_key, BytesIO(preview), IMAGE_PREVIEW_CONTENT_TYPE)
+                attachment.preview_size_bytes = len(preview)
             attachment.status = 'ready'
             attachment.mark_as_deleted()
             db.commit()
@@ -160,7 +198,7 @@ class NotesAttachmentsService:
                     NotesAttachment.id == attachment_id,
                 ).with_for_update().first()
                 if attachment:
-                    storage.delete(attachment.storage_key)
+                    cls.delete_files(storage, attachment)
                     db.delete(attachment)
                 db.commit()
             except Exception:
@@ -319,7 +357,7 @@ class NotesAttachmentsService:
 
             try:
                 # keep both locks until deletion commits so saves cannot restore a file being removed
-                storage.delete(attachment.storage_key)
+                cls.delete_files(storage, attachment)
             except StorageError:
                 db.commit()
                 logger.exception('Attachment cleanup failed for %s', attachment_id)

@@ -94,13 +94,16 @@ class NotesAttachment(BaseModel):
     __tablename__ = 'notes_attachments'
 
     note_id = Column(Integer, ForeignKey('notes.id'), nullable=False, index=True)
-    storage_key = Column(String(256), nullable=False, unique=True)
-    original_filename = Column(String(256), nullable=False)
     content_type = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default='uploading')
+    original_filename = Column(String(256), nullable=False)
+
+    storage_key = Column(String(256), nullable=False, unique=True)
     size_bytes = Column(BigInteger, nullable=False)
+    preview_storage_key = Column(String(256), nullable=True)
+    preview_size_bytes = Column(BigInteger, nullable=True)
     width = Column(Integer, nullable=False)
     height = Column(Integer, nullable=False)
-    status = Column(String(16), nullable=False, default='uploading')
 
     __table_args__ = (
         CheckConstraint("status IN ('uploading', 'ready')", name='ck_notes_attachments_status'),
