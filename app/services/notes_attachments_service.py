@@ -19,7 +19,10 @@ from app.models.notes import Note, NotesAttachment, NotesFolder
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
 FORMATS = {'PNG': ('image/png', 'png'), 'JPEG': ('image/jpeg', 'jpg'), 'WEBP': ('image/webp', 'webp')}
+FILE_EXTENSIONS = {'pdf', 'txt', 'md', 'csv', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'zip'}
+FILE_CONTENT_TYPE = 'application/octet-stream'
 INCOMPLETE_UPLOAD_TTL_DAYS = 1
 IMAGE_PREVIEW_MAX_EDGE = 1600
 IMAGE_PREVIEW_QUALITY = 82
@@ -99,21 +102,26 @@ class NotesAttachmentsService:
 
     @staticmethod
     def metadata(attachment: NotesAttachment) -> dict:
-        fields = ('id', 'note_id', 'original_filename', 'content_type', 'size_bytes', 'width', 'height', 'created_dt')
+        fields = ('id', 'note_id', 'original_filename', 'content_type', 'attachment_type',
+                  'size_bytes', 'width', 'height', 'created_dt')
         return {
             **{field: getattr(attachment, field) for field in fields},
             'url': attachment_url(attachment.note_id, attachment.id),
         }
 
     @staticmethod
-    def validate_image(file: BinaryIO) -> tuple[int, str, str, int, int]:
+    def measure_file(file: BinaryIO) -> int:
         limit = settings.ATTACHMENTS_MAX_FILE_SIZE_MB * 1024 * 1024
         file.seek(0, 2)
         size = file.tell()
         file.seek(0)
         if size > limit:
             raise HTTPException(413, 'Attachment exceeds file size limit')
+        return size
 
+    @classmethod
+    def validate_image(cls, file: BinaryIO) -> tuple[int, str, str, int, int]:
+        size = cls.measure_file(file)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter('error', Image.DecompressionBombWarning)
@@ -150,8 +158,16 @@ class NotesAttachmentsService:
     ) -> NotesAttachment:
         # validate note and image
         cls.get_note(db, note_id, user_id, editable=True)
-        size, content_type, extension, width, height = cls.validate_image(file)
-        preview = cls.generate_preview_image(file) if max(width, height) > IMAGE_PREVIEW_MAX_EDGE else None
+        filename = PurePath(filename.replace('\\', '/')).name
+        extension = PurePath(filename).suffix.lower().lstrip('.')
+        if extension in FILE_EXTENSIONS:
+            attachment_type = 'file'
+            size, content_type = cls.measure_file(file), FILE_CONTENT_TYPE
+            width = height = preview = None
+        else:
+            attachment_type = 'image'
+            size, content_type, extension, width, height = cls.validate_image(file)
+            preview = cls.generate_preview_image(file) if max(width, height) > IMAGE_PREVIEW_MAX_EDGE else None
 
         # lock user and note, and count total attachments size
         db.query(User).filter(User.id == user_id).with_for_update().one()
@@ -170,7 +186,8 @@ class NotesAttachmentsService:
             note_id=note_id,
             content_type=content_type, size_bytes=size, width=width, height=height,
             status='uploading',
-            original_filename=PurePath(filename.replace('\\', '/')).name[:256] or f'image.{extension}',
+            original_filename=filename[:256] or f'image.{extension}',
+            attachment_type=attachment_type,
             storage_key=f'{storage_path}.{extension}',
             preview_storage_key=f'{storage_path}-preview.webp' if preview else None,
         )
@@ -239,7 +256,7 @@ class NotesAttachmentsService:
 
     @classmethod
     def synchronize_body(cls, db: Session, note: Note, body: str, *, previous_body: str | None = None) -> str:
-        """ Checks images in the note HTML, normalizes their URLs and marks unused attachments as deleted. """
+        """ Validates attachment references, normalizes their URLs and marks unused attachments as deleted. """
         soup = BeautifulSoup(body, 'html.parser')
         old = BeautifulSoup((note.body or '') if previous_body is None else previous_body, 'html.parser')
 
@@ -252,17 +269,19 @@ class NotesAttachmentsService:
         by_id = {str(item.id): item for item in attachments}
 
         referenced = set()
-        for image in soup.find_all('img'):
+        links_by_url = {attachment_url(note.id, item.id): str(item.id) for item in attachments}
+        for image in soup.find_all(['img', 'a']):
+            url_attr = 'src' if image.name == 'img' else 'href'
             raw_id = image.get('data-attachment-id')
             if raw_id is None:
                 # recognize stable URLs even when another editor strips the data attribute
-                matching = [item for item in attachments if image.get('src') == attachment_url(note.id, item.id)]
-                if matching:
-                    raw_id = str(matching[0].id)
-                elif legacy[str(image)] > 0:
+                raw_id = links_by_url.get(image.get(url_attr))
+                if raw_id is None and image.name == 'a':
+                    continue
+                if raw_id is None and legacy[str(image)] > 0:
                     legacy[str(image)] -= 1
                     continue
-                else:
+                if raw_id is None:
                     raise HTTPException(422, 'Images must reference an uploaded attachment')
 
             try:
@@ -278,8 +297,12 @@ class NotesAttachmentsService:
                                                 attachment.deleted_dt <= cls.retention_cutoff()))):
                 raise HTTPException(422, 'Attachment does not belong to this note or is unavailable')
 
+            expected_type = 'image' if image.name == 'img' else 'file'
+            if attachment.attachment_type != expected_type:
+                raise HTTPException(422, 'Attachment type does not match its reference')
+
             image['data-attachment-id'] = normalized_id
-            image['src'] = attachment_url(note.id, attachment.id)
+            image[url_attr] = attachment_url(note.id, attachment.id)
             referenced.add(normalized_id)
 
         for attachment in attachments:
@@ -290,7 +313,7 @@ class NotesAttachmentsService:
                 elif not attachment.is_deleted:
                     attachment.mark_as_deleted()
 
-        return str(soup) if soup.find('img') else body
+        return str(soup) if referenced else body
 
     @classmethod
     def cleanup(cls, db: Session, storage: FileStorage, *, limit: int = 100) -> int:
@@ -332,10 +355,11 @@ class NotesAttachmentsService:
             if (
                 attachment.status == 'ready' and not note.is_deleted and not cls.has_deleted_folder(db, note.folder_id)
             ):
-                images = BeautifulSoup(note.body or '', 'html.parser').find_all('img')
+                tag, url_attr = ('img', 'src') if attachment.attachment_type == 'image' else ('a', 'href')
+                images = BeautifulSoup(note.body or '', 'html.parser').find_all(tag)
                 referenced = any(
                     image.get('data-attachment-id') == str(attachment.id) or
-                    image.get('src') == attachment_url(note.id, attachment.id)
+                    image.get(url_attr) == attachment_url(note.id, attachment.id)
                     for image in images
                 )
                 if referenced:

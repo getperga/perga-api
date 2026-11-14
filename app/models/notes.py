@@ -94,18 +94,22 @@ class NotesAttachment(BaseModel):
     __tablename__ = 'notes_attachments'
 
     note_id = Column(Integer, ForeignKey('notes.id'), nullable=False, index=True)
+    attachment_type = Column(String(16), nullable=False, default='image', server_default='image')
     content_type = Column(String(64), nullable=False)
     status = Column(String(16), nullable=False, default='uploading')
     original_filename = Column(String(256), nullable=False)
 
     storage_key = Column(String(256), nullable=False, unique=True)
     size_bytes = Column(BigInteger, nullable=False)
+
+    # image only fields
     preview_storage_key = Column(String(256), nullable=True)
     preview_size_bytes = Column(BigInteger, nullable=True)
-    width = Column(Integer, nullable=False)
-    height = Column(Integer, nullable=False)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
 
     __table_args__ = (
+        CheckConstraint("attachment_type IN ('image', 'file')", name='ck_notes_attachments_type'),
         CheckConstraint("status IN ('uploading', 'ready')", name='ck_notes_attachments_status'),
         Index('ix_notes_attachments_cleanup', 'is_deleted', 'deleted_dt'),
     )

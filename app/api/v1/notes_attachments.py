@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -48,6 +50,9 @@ def get_attachment_content(
 ):
     attachment = NotesAttachmentsService.get_attachment(db, note_id, attachment_id, current_user.id)
     headers = {**CONTENT_HEADERS, 'Content-Length': str(attachment.size_bytes)}
+    if attachment.attachment_type == 'file':
+        filename = quote(attachment.original_filename, safe='')
+        headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{filename}"
     content_type = attachment.content_type
 
     stream = None

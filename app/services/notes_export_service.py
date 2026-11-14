@@ -114,7 +114,8 @@ class NotesExportService:
 
         files = {}
         pdf_assets = {}
-        for image in soup.find_all('img', attrs={'data-attachment-id': True}):
+        changed = False
+        for image in soup.find_all(['img', 'a'], attrs={'data-attachment-id': True}):
             try:
                 attachment_id = int(image['data-attachment-id'])
             except ValueError as exc:
@@ -122,7 +123,19 @@ class NotesExportService:
 
             attachment = NotesAttachmentsService.get_attachment(db, note.id, attachment_id, note.user_id)
             extension = attachment.storage_key.rsplit('.', 1)[-1]
-            path = f'assets/{attachment.id}.{extension}'
+            image.attrs.pop('data-attachment-id', None)
+            changed = True
+            if attachment.attachment_type == 'file':
+                if export_type == ExportType.PDF:
+                    image.unwrap()
+                    continue
+                filename = ''.join(char for char in attachment.original_filename if char.isprintable())
+                if not filename.lower().endswith(f'.{extension}'):
+                    filename = f'{filename}.{extension}'
+                path = f'assets/files/{attachment.id}/{filename}'
+            else:
+                path = f'assets/{attachment.id}.{extension}'
+
             if path not in files:
                 stream = get_file_storage().open(attachment.storage_key)
                 try:
@@ -130,15 +143,14 @@ class NotesExportService:
                 finally:
                     stream.close()
 
-            image.attrs.pop('data-attachment-id', None)
             if export_type == ExportType.PDF:
                 url = f'https://perga.invalid/attachments/{attachment.id}'
                 pdf_assets[url] = (files[path], attachment.content_type)
                 image['src'] = url
             else:
-                image['src'] = path
+                image['src' if image.name == 'img' else 'href'] = urllib.parse.quote(path)
 
-        body = str(soup) if files else note.body
+        body = str(soup) if changed else note.body
         return cls._get_note_content(note, export_type, body=body, assets=pdf_assets), files
 
     @classmethod

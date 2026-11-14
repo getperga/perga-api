@@ -17,7 +17,7 @@ from app.models.notes import Note
 from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema
 from app.services.notes_service import NoteService
-from app.services.notes_attachments_service import NotesAttachmentsService, attachment_url
+from app.services.notes_attachments_service import FILE_EXTENSIONS, NotesAttachmentsService, attachment_url
 from app.services.notes_folders_service import NotesFolderService
 
 
@@ -149,74 +149,78 @@ class NotesImportService:
             return None
 
         soup = BeautifulSoup(body, 'html.parser')
-        images = soup.find_all('img')
-        if not images:
+        references = [
+            (element, 'src' if element.name == 'img' else 'href')
+            for element in soup.select('img, a[href^="assets/files/"]')
+        ]
+        if not references:
             return NoteService.create_note(db, user_id, NoteCreateSchema(folder_id=folder_id, title=title, body=body))
-        if archive is None:
-            raise HTTPException(422, 'Images must be imported in a ZIP archive with their assets')
-        prepared = cls._prepare_archive_images(soup, archive, archive_path)
 
-        return cls._create_note_with_images(db, user_id, folder_id, title, soup, prepared)
+        if archive is None:
+            raise HTTPException(422, 'Attachments must be imported in a ZIP archive with their assets')
+
+        prepared = {}
+        for element, attr in references:
+            path = cls._resolve_archive_asset_path(str(element.get(attr, '')), archive_path)
+            if path not in prepared:
+                prepared[path] = cls._read_archive_asset(archive, path)
+            extension = posixpath.splitext(path)[1].lower().lstrip('.')
+            if attr == 'src':
+                NotesAttachmentsService.validate_image(io.BytesIO(prepared[path]))
+                if extension in FILE_EXTENSIONS:
+                    raise HTTPException(422, 'Image asset has a file attachment extension')
+            elif extension not in FILE_EXTENSIONS:
+                raise HTTPException(422, 'Unsupported file attachment extension')
+            element[attr] = path
+            element.attrs.pop('data-attachment-id', None)
+
+        return cls._create_note_with_assets(db, user_id, folder_id, title, soup, references, prepared)
 
     @classmethod
-    def _resolve_archive_image_path(cls, source_url: str, archive_path: str) -> str:
-        """ Resolves a relative image path within the ZIP root. """
+    def _resolve_archive_asset_path(cls, source_url: str, archive_path: str) -> str:
+        """ Resolves a relative attachment path within the ZIP root. """
         try:
             source = urlsplit(source_url)
         except ValueError as exc:
-            raise HTTPException(422, 'Invalid image URL') from exc
+            raise HTTPException(422, 'Invalid attachment URL') from exc
 
         if source.scheme or source.netloc or not source.path or source.query or source.fragment:
-            raise HTTPException(422, 'Only relative image paths inside the ZIP are supported')
+            raise HTTPException(422, 'Only relative attachment paths inside the ZIP are supported')
 
         decoded_path = unquote(source.path)
         if decoded_path.startswith('/') or '\\' in decoded_path:
-            raise HTTPException(422, 'Invalid image path')
+            raise HTTPException(422, 'Invalid attachment path')
 
         path = posixpath.normpath(posixpath.join(posixpath.dirname(archive_path), decoded_path))
         if path == '..' or path.startswith('../'):
-            raise HTTPException(422, 'Image path escapes ZIP root')
+            raise HTTPException(422, 'Attachment path escapes ZIP root')
 
         return path
 
     @classmethod
-    def _read_archive_image(cls, archive: zipfile.ZipFile, path: str) -> bytes:
-        """ Reads and validates an image from the archive before creating a note. """
+    def _read_archive_asset(cls, archive: zipfile.ZipFile, path: str) -> bytes:
+        """ Reads an attachment from the archive before creating a note. """
         try:
-            info = next(item for item in archive.infolist()
-                        if cls._check_zipped_filename(item.filename, item) == path)
+            info = next(
+                item for item in archive.infolist() if cls._check_zipped_filename(item.filename, item) == path
+            )
         except StopIteration as exc:
-            raise HTTPException(422, 'Image is missing from the ZIP archive') from exc
+            raise HTTPException(422, 'Attachment is missing from the ZIP archive') from exc
 
         if info.file_size > settings.ATTACHMENTS_MAX_FILE_SIZE_MB * 1024 * 1024:
-            raise HTTPException(413, 'Imported image exceeds file size limit')
+            raise HTTPException(413, 'Imported attachment exceeds file size limit')
 
         try:
             data = archive.read(info)
         except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError) as exc:
-            raise HTTPException(422, 'Cannot read image from ZIP archive') from exc
+            raise HTTPException(422, 'Cannot read attachment from ZIP archive') from exc
 
-        NotesAttachmentsService.validate_image(io.BytesIO(data))
         return data
 
     @classmethod
-    def _prepare_archive_images(
-        cls, soup: BeautifulSoup, archive: zipfile.ZipFile, archive_path: str,
-    ) -> dict[str, bytes]:
-        """ Validates image references and collect each archive asset once. """
-        prepared = {}
-        for image in soup.find_all('img'):
-            path = cls._resolve_archive_image_path(str(image.get('src', '')), archive_path)
-            if path not in prepared:
-                prepared[path] = cls._read_archive_image(archive, path)
-            image['src'] = path
-            image.attrs.pop('data-attachment-id', None)
-        return prepared
-
-    @classmethod
-    def _create_note_with_images(
+    def _create_note_with_assets(
         cls, db: Session, user_id: int, folder_id: int, title: str,
-        soup: BeautifulSoup, prepared: dict[str, bytes],
+        soup: BeautifulSoup, references: list, prepared: dict[str, bytes],
     ) -> Note | None:
         """ Creates a note with uploaded assets and mark it deleted if import fails. """
         note = NoteService.create_note(db, user_id, NoteCreateSchema(folder_id=folder_id, title=title))
@@ -228,10 +232,10 @@ class NotesImportService:
                 uploaded[path] = NotesAttachmentsService.upload(
                     db, get_file_storage(), note.id, user_id, io.BytesIO(data), posixpath.basename(path),
                 )
-            for image in soup.find_all('img'):
-                attachment = uploaded[image['src']]
-                image['data-attachment-id'] = str(attachment.id)
-                image['src'] = attachment_url(note.id, attachment.id)
+            for element, attr in references:
+                attachment = uploaded[element[attr]]
+                element['data-attachment-id'] = str(attachment.id)
+                element[attr] = attachment_url(note.id, attachment.id)
             note = NoteService.update_note(db, note.id, user_id, NoteUpdateSchema(body=str(soup)))
         except Exception:
             db.rollback()
@@ -307,6 +311,8 @@ class NotesImportService:
         if cls._is_special_path(filename):
             return True
 
+        if cls.ARCHIVE_ASSETS_FOLDER_NAME in filename.rstrip('/').split('/')[:-1]:
+            return True
         if file_info.is_dir():
             return filename.rstrip('/').split('/')[-1] == cls.ARCHIVE_ASSETS_FOLDER_NAME
 
