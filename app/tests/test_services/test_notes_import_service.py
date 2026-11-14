@@ -1,5 +1,6 @@
 import io
 import zipfile
+from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from app.services.notes_folders_service import NotesFolderService
@@ -23,6 +24,27 @@ class TestNotesImportService:
         title, body = NotesImportService._parse_markdown(content, '')
         assert title == 'Untitled Note'
         assert body == '<p>This is a test note without H1.</p>'
+
+    def test_parse_markdown_task_list_with_separate_paragraphs(self):
+        content = 'Before\n\n- [x] Done\n\n    Details\n    continued\n\n- [ ] To do\n\nAfter'
+        _, body = NotesImportService._parse_markdown(content, 'test')
+        soup = BeautifulSoup(body, 'html.parser')
+        assert [tag.name for tag in soup.find_all(recursive=False)] == ['p', 'p', 'ul', 'p', 'p']
+        tasks = soup.select('ul[data-type="taskList"] > li[data-type="taskItem"]')
+        assert [task['data-checked'] for task in tasks] == ['true', 'false']
+        assert [[p.get_text(' ', strip=True) for p in task.find_all('p')] for task in tasks] == [
+            ['Done', 'Details continued'],
+            ['To do'],
+        ]
+        assert len(tasks[0].select('p > br')) == 1
+
+    def test_parse_markdown_nested_task_list(self):
+        content = '- [x] Parent\n    - [ ] Child\n- [ ] Next'
+        _, body = NotesImportService._parse_markdown(content, 'test')
+        soup = BeautifulSoup(body, 'html.parser')
+        child = soup.select_one('li[data-checked="true"] > ul[data-type="taskList"] > li[data-checked="false"]')
+        assert child.get_text(strip=True) == 'Child'
+        assert not soup.select('li p')
 
     def test_parse_html_with_title(self):
         content = '<html><head><title>Page Title</title></head><body><h1>H1 Title</h1><p>Content</p></body></html>'

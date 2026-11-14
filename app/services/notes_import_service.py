@@ -3,9 +3,8 @@ import io
 import markdown
 import os
 import posixpath
-import re
 import zipfile
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from urllib.parse import unquote, urlsplit
@@ -52,12 +51,8 @@ class NotesImportService:
         return title, body
 
     @classmethod
-    def _post_process_task_lists(cls, body_html: str):
+    def _post_process_task_lists(cls, soup: BeautifulSoup) -> None:
         """ Post-process task lists from Markdown for TipTap compatibility """
-        if 'task-list' not in body_html:
-            return body_html
-
-        soup = BeautifulSoup(body_html, 'html.parser')
         for ul in soup.find_all('ul', class_='task-list'):
             ul['data-type'] = 'taskList'
             # remove class to keep it clean
@@ -73,9 +68,6 @@ class NotesImportService:
 
                 # remove class
                 del li['class']
-        body_html = str(soup)
-
-        return body_html
 
     @classmethod
     def _parse_markdown(cls, content: str, default_title: str) -> tuple[str, str]:
@@ -110,12 +102,20 @@ class NotesImportService:
             }
         )
 
-        body_html = cls._post_process_task_lists(body_html)
+        soup = BeautifulSoup(body_html, 'html.parser')
+        cls._post_process_task_lists(soup)
 
-        # to avoid losing line breaks, replace \n with empty paragraph tags but not in between of lists
-        body_html = re.sub(r'\n(?=<(?!li|/ul|/ol))', '<p></p>', body_html)
+        # preserve spacing between top-level blocks without inserting paragraphs inside them
+        for child in list(soup.children):
+            if (
+                isinstance(child, NavigableString)
+                and child == '\n'
+                and isinstance(child.previous_sibling, Tag)
+                and isinstance(child.next_sibling, Tag)
+            ):
+                child.replace_with(soup.new_tag('p'))
 
-        return title, body_html
+        return title, str(soup)
 
     @classmethod
     def _parse_txt(cls, content: str, default_title: str) -> tuple[str, str]:
