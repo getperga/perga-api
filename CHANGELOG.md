@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.6] - 2026-11-14
+
+### Added
+
+- notes images preview
+- notes file attachments
+
+### Fixed
+
+- notes import bug
+
 ## [1.2.5] - 2026-11-11
 
 ### Added
