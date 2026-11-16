@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: postgres:16.16-bookworm
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -30,13 +30,13 @@ services:
       - "8000:8000"
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health/" ]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/', timeout=3)"]
       interval: 30s
       timeout: 10s
       retries: 3
 
   nginx:
-    image: nginx:1.25
+    image: nginx:1.31.8-trixie
     ports:
       - "8080:80"
     depends_on:

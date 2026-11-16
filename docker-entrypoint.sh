@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e  # fail fast
 
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 echo "Running Alembic migrations..."
 alembic upgrade head
 
