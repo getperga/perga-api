@@ -1,6 +1,6 @@
 import logging
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
@@ -61,7 +61,10 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_database_uri(self) -> str:
-        return f'postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}/{self.POSTGRES_DB}'
+        user = quote(self.POSTGRES_USER or '', safe='')
+        password = quote(self.POSTGRES_PASSWORD or '', safe='')
+        database = quote(self.POSTGRES_DB or '', safe='')
+        return f'postgresql://{user}:{password}@{self.POSTGRES_HOST}/{database}'
 
     class Config:
         env_file = '.env'
