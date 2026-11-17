@@ -136,6 +136,8 @@ class NoteService(BaseService[Note]):
         if data.get('folder_id') is None:
             root_folder = NotesFolderService.get_root_folder(db, user_id)
             data['folder_id'] = root_folder.id
+        NotesFolderService.lock_tree(db, user_id)
+        NotesFolderService.require_destination(db, data['folder_id'], user_id)
 
         db_note = Note(user_id=user_id, **data)
         db.add(db_note)
@@ -150,13 +152,17 @@ class NoteService(BaseService[Note]):
 
     @classmethod
     def update_note(cls, db: Session, note_id: int, user_id: int, update_data: NoteUpdateSchema) -> Note | None:
+        update_data_dict = update_data.model_dump(exclude_unset=True)
+        if 'folder_id' in update_data_dict:
+            NotesFolderService.lock_tree(db, user_id)
         db_note = cls.get_base_query(db, user_id=user_id).filter(
             Note.id == note_id,
         ).populate_existing().with_for_update().first()
         if not db_note:
             return None
 
-        update_data_dict = update_data.model_dump(exclude_unset=True)
+        if 'folder_id' in update_data_dict:
+            NotesFolderService.require_destination(db, update_data_dict['folder_id'], user_id, allow_trash=True)
         if update_data_dict.get('is_pinned') is True and not db_note.is_pinned:
             pinned_notes = cls.get_base_query(db, user_id=user_id).filter(
                 Note.is_pinned.is_(True),

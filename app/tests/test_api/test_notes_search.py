@@ -90,15 +90,17 @@ class TestNotesSearchAPI:
                 folder_id=subfolder.id
             )
         )
-        NoteService.create_note(
+        trashed = NoteService.create_note(
             test_db,
             user_id=test_user.id,
             create_data=NoteCreateSchema(
                 title='Old roadmap',
                 body='<p>roadmap</p>',
-                folder_id=trash_folder.id
+                folder_id=subfolder.id
             )
         )
+        trashed.folder_id = trash_folder.id
+        test_db.commit()
 
         response = client.get(
             f'{settings.API_V1_STR}/notes/search/',

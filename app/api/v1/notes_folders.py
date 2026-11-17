@@ -47,7 +47,7 @@ def update_notes_folder(
         db, folder_id=folder_id, user_id=current_user.id, update_data=request_data
     )
     if not success:
-        raise HTTPException(status_code=400, detail="Cannot move folder to its subfolder or itself")
+        raise HTTPException(status_code=400, detail="Invalid destination for folder move")
 
     return folder
 

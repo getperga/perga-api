@@ -63,15 +63,15 @@ class NotesAttachmentsService:
         storage.delete(attachment.storage_key)
 
     @staticmethod
-    def has_deleted_folder(db: Session, folder_id: int) -> bool:
+    def has_deleted_folder(db: Session, folder_id: int, user_id: int) -> bool:
         seen = set()
         while folder_id and folder_id not in seen:
             seen.add(folder_id)
-            folder = db.query(NotesFolder).filter(NotesFolder.id == folder_id).first()
+            folder = db.query(NotesFolder).filter(NotesFolder.id == folder_id, NotesFolder.user_id == user_id).first()
             if not folder or folder.is_deleted:
                 return True
             folder_id = folder.parent_id
-        return False
+        return folder_id is not None
 
     @staticmethod
     def get_note(db: Session, note_id: int, user_id: int, *, lock=False, editable=False) -> Note:
@@ -83,20 +83,20 @@ class NotesAttachmentsService:
         if not note:
             raise HTTPException(404, 'Note not found')
 
-        folder = db.query(NotesFolder).filter(NotesFolder.id == note.folder_id).first()
+        folder_id = note.folder_id
         seen = set()
-        while folder and folder.id not in seen:
-            seen.add(folder.id)
-
-            if folder.is_deleted:
+        while folder_id is not None:
+            folder = db.query(NotesFolder).filter(
+                NotesFolder.id == folder_id, NotesFolder.user_id == user_id,
+            ).first()
+            if not folder or folder.is_deleted or folder.id in seen:
                 raise HTTPException(404, 'Note not found')
 
             if editable and folder.folder_type == NotesFolderType.TRASH:
                 raise HTTPException(409, 'Notes in trash cannot be edited')
 
-            folder = (
-                db.query(NotesFolder).filter(NotesFolder.id == folder.parent_id).first() if folder.parent_id else None
-            )
+            seen.add(folder_id)
+            folder_id = folder.parent_id
 
         return note
 
@@ -321,17 +321,21 @@ class NotesAttachmentsService:
         cutoff = cls.retention_cutoff()
         stale = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=INCOMPLETE_UPLOAD_TTL_DAYS)
 
-        deleted_folders = select(NotesFolder.id).where(NotesFolder.is_deleted.is_(True)).cte(
+        deleted_folders = select(NotesFolder.id, NotesFolder.user_id).where(NotesFolder.is_deleted.is_(True)).cte(
             'deleted_attachment_folders', recursive=True,
         )
         deleted_folders = deleted_folders.union(
-            select(NotesFolder.id).where(NotesFolder.parent_id == deleted_folders.c.id),
+            select(NotesFolder.id, NotesFolder.user_id).where(
+                NotesFolder.parent_id == deleted_folders.c.id,
+                NotesFolder.user_id == deleted_folders.c.user_id,
+            ),
         )
+        owner_deleted_folders = select(deleted_folders.c.id).where(deleted_folders.c.user_id == Note.user_id)
         candidates = db.query(NotesAttachment.id, NotesAttachment.note_id).join(Note).filter(
             ((NotesAttachment.status == 'uploading') & (NotesAttachment.created_dt < stale)) |
             ((NotesAttachment.status == 'ready') & (
                     (NotesAttachment.is_deleted.is_(True) & (NotesAttachment.deleted_dt < cutoff)) |
-                    Note.is_deleted.is_(True) | Note.folder_id.in_(select(deleted_folders.c.id))
+                    Note.is_deleted.is_(True) | Note.folder_id.in_(owner_deleted_folders)
             )),
         ).order_by(NotesAttachment.created_dt).limit(limit).all()
         db.rollback()
@@ -353,7 +357,8 @@ class NotesAttachmentsService:
                 continue
 
             if (
-                attachment.status == 'ready' and not note.is_deleted and not cls.has_deleted_folder(db, note.folder_id)
+                attachment.status == 'ready' and not note.is_deleted
+                and not cls.has_deleted_folder(db, note.folder_id, note.user_id)
             ):
                 tag, url_attr = ('img', 'src') if attachment.attachment_type == 'image' else ('a', 'href')
                 images = BeautifulSoup(note.body or '', 'html.parser').find_all(tag)

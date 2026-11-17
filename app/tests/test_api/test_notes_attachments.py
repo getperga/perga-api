@@ -13,7 +13,8 @@ from app.models.notes import NotesAttachment
 from app.models.user import User
 from app.schemas.notes import NoteCreateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema
-from app.services.auth_utils import create_access_token, generate_password_hash
+from app.services.auth_service import AuthService
+from app.services.auth_utils import generate_password_hash
 from app.services.notes_attachments_service import NotesAttachmentsService
 from app.services.notes_folders_service import NotesFolderService
 from app.services.notes_import_service import NotesImportService
@@ -144,7 +145,8 @@ def test_auth_and_cross_note_isolation(client, test_db, test_user, note, auth_he
                    hashed_password=generate_password_hash('password'), is_active=True)
     test_db.add(foreign)
     test_db.commit()
-    headers = {'Authorization': f'Bearer {create_access_token(data={"sub": str(foreign.id)})}'}
+    token = AuthService.create_user_tokens(test_db, foreign)['access_token']
+    headers = {'Authorization': f'Bearer {token}'}
     assert client.get(data['url'], headers=headers).status_code == 404
     assert client.get(f'/api/v1/notes/{note.id}/attachments/', headers=headers).status_code == 404
     assert upload(client, note, headers, image_bytes).status_code == 404
@@ -267,7 +269,8 @@ def test_trash_and_deleted_note(client, test_db, note, test_user, auth_headers, 
     data = upload(client, note, auth_headers, image_bytes).json()
     trash = NotesFolderService.get_trash_folder(test_db, test_user.id)
     child = NotesFolderService.create_folder(test_db, test_user.id,
-                                            NotesFolderCreateSchema(parent_id=trash.id, name='Nested'))
+                                            NotesFolderCreateSchema(name='Nested'))
+    child.parent_id = trash.id
     note.folder_id = child.id
     test_db.commit()
     assert upload(client, note, auth_headers, image_bytes).status_code == 409
