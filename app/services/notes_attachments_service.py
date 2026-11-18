@@ -16,7 +16,7 @@ from app.const.notes import NotesFolderType
 from app.core.config import settings
 from app.core.file_storage import FileStorage, StorageError
 from app.models.notes import Note, NotesAttachment, NotesFolder
-from app.models.user import User
+from app.models.auth import User
 
 logger = logging.getLogger(__name__)
 

@@ -10,11 +10,11 @@ from app.core.config import settings
 from app.core.file_storage import LocalFileStorage, StorageError, get_file_storage
 from app.main import app
 from app.models.notes import NotesAttachment
-from app.models.user import User
+from app.models.auth import User
 from app.schemas.notes import NoteCreateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema
 from app.services.auth_service import AuthService
-from app.services.auth_utils import generate_password_hash
+from app.helpers.auth_helper import AuthHelper
 from app.services.notes_attachments_service import NotesAttachmentsService
 from app.services.notes_folders_service import NotesFolderService
 from app.services.notes_import_service import NotesImportService
@@ -142,7 +142,7 @@ def test_auth_and_cross_note_isolation(client, test_db, test_user, note, auth_he
     assert result.status_code == 422
     test_db.rollback()
     foreign = User(username='images-other', email='images-other@example.test',
-                   hashed_password=generate_password_hash('password'), is_active=True)
+                   hashed_password=AuthHelper.generate_password_hash('password'), is_active=True)
     test_db.add(foreign)
     test_db.commit()
     token = AuthService.create_user_tokens(test_db, foreign)['access_token']

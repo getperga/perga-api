@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.const.notes import IMPORT_SIZE_LIMIT, IMPORT_SIZE_LIMIT_MB
 from app.core.database import get_db
-from app.models.user import User
+from app.models.auth import User
 from app.schemas.notes_import import NotesImportResponseSchema
 from app.services.auth_service import AuthService
 from app.services.notes_folders_service import NotesFolderService

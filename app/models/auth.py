@@ -1,11 +1,13 @@
-from sqlalchemy import Column, String, Boolean, true, false
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, false, true
 from sqlalchemy.orm import relationship
 
 from app.const.planner import WeekStartDay
+from app.core.database import Base
 from app.models.base import BaseModel
 
 
 __all__ = (
+    'AuthSession',
     'User',
 )
 
@@ -17,6 +19,10 @@ class User(BaseModel):
     email: str = Column(String(length=64), unique=True, index=True, nullable=False)
     hashed_password: str | None = Column(String(length=128), nullable=True)
     is_active: bool = Column(Boolean, default=True, server_default=true(), nullable=False)
+
+    # the PostgreSQL trigger created by Alembic revision 0014_auth_sessions increments this version
+    # when the password or account status changes; sessions issued with an earlier version become invalid.
+    auth_epoch = Column(BigInteger, server_default='0', nullable=False)
 
     # external auth
     google_id: str | None = Column(String(length=128), unique=True, index=True, nullable=True)
@@ -34,3 +40,12 @@ class User(BaseModel):
 
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, email={self.email}, is_active={self.is_active})>"
+
+
+class AuthSession(Base):
+    __tablename__ = 'auth_sessions'
+
+    id = Column(String(36), primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    auth_epoch = Column(BigInteger, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)

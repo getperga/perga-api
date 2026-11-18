@@ -6,7 +6,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.const.notes import NotesFolderType
 from app.models.notes import Note, NotesFolder
-from app.models.user import User
+from app.models.auth import User
 from app.schemas.notes_folders import NotesFolderCreateSchema, NotesFolderUpdateSchema
 from app.services.base_service import BaseService
 
