@@ -6,6 +6,11 @@ from app.const.auth import SIGNING_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRE
 from app.core.config import settings
 
 
+__all__ = (
+    'AuthHelper',
+)
+
+
 class AuthHelper:
     @staticmethod
     def generate_password_hash(plain_password: str) -> str:

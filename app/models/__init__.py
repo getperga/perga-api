@@ -1,3 +1,3 @@
-from app.models.auth import *
-from app.models.notes import *
-from app.models.planner import  *
+from .auth import *
+from .notes import *
+from .planner import *

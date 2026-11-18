@@ -2,9 +2,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.user import User
+from app.helpers.auth_helper import AuthHelper
+from app.models.auth import User
 from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
-from app.services.auth_utils import generate_password_hash
 from app.services.notes_folders_service import NotesFolderService
 from app.services.notes_service import NoteService
 
@@ -97,7 +97,7 @@ class TestNotesAPI:
         other_user = User(
             username='notes-owner',
             email='notes-owner@example.com',
-            hashed_password=generate_password_hash('other-password'),
+            hashed_password=AuthHelper.generate_password_hash('other-password'),
             is_active=True,
         )
         test_db.add(other_user)

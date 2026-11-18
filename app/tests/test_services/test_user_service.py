@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 from unittest.mock import patch
 
 from app.core.config import settings
-from app.models.user import User
+from app.helpers import AuthHelper
+from app.models import User
 from app.schemas.user import UserCreateSchema, UserUpdateSchema
-from app.services.auth_utils import validate_password
 from app.services.user_service import UserService
 from app.tests.const import TEST_USERNAME, TEST_PASSWORD
 
@@ -62,7 +62,7 @@ class TestUserService:
         assert db_user.id is not None
         assert db_user.username == user_create.username
         assert db_user.email == user_create.email
-        assert db_user.hashed_password and validate_password(user_create.password, db_user.hashed_password)
+        assert db_user.hashed_password and AuthHelper.validate_password(user_create.password, db_user.hashed_password)
         assert db_user.is_active is True
 
     def test_create_user_duplicate_email(self, test_db: Session, test_user):
@@ -122,7 +122,7 @@ class TestUserService:
             current_password=TEST_PASSWORD,
             new_password='newpassword123'
         )
-        assert validate_password('newpassword123', db_user.hashed_password)
+        assert AuthHelper.validate_password('newpassword123', db_user.hashed_password)
 
         # Attempt to change with wrong current password
         with pytest.raises(ValueError) as excinfo:
@@ -150,7 +150,7 @@ class TestUserService:
         assert (
             updated_user
             and updated_user.hashed_password
-            and validate_password('newpassword123', updated_user.hashed_password)
+            and AuthHelper.validate_password('newpassword123', updated_user.hashed_password)
         )
 
     def test_create_user_signup_disabled(self, test_db: Session):

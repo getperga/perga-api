@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.helpers.browser_session_helper import BrowserSessionHelper
 from app.schemas.auth import TokenSchema, SigninSchema, RefreshTokenSchema, GoogleSigninSchema
 from app.schemas.user import UserSchema, UserCreateSchema, UserUpdateSchema, PasswordChangeSchema
 from app.services.user_service import UserService
 from app.services.auth_service import AuthService
 
 router = APIRouter()
+
 
 @router.post("/signup/", response_model=UserSchema)
 def signup(request_data: UserCreateSchema, db: Session = Depends(get_db)):
@@ -24,7 +26,9 @@ def signup(request_data: UserCreateSchema, db: Session = Depends(get_db)):
 
 
 @router.post("/access_token/", response_model=TokenSchema)
-def get_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def get_access_token(
+    response: Response, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db),
+):
     """ Get an access token using username and password """
     user = AuthService.authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -34,14 +38,15 @@ def get_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Sessi
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Create tokens using AuthService
-    tokens = AuthService.create_user_tokens(user.id)
-    return tokens
+    return BrowserSessionHelper.prepare_tokens_response(response, AuthService.create_user_tokens(db, user), None)
 
 
 @router.post("/access_token_json/", response_model=TokenSchema)
-def get_access_token_json(signin_data: SigninSchema, db: Session = Depends(get_db)):
+def get_access_token_json(
+    signin_data: SigninSchema, request: Request, response: Response, db: Session = Depends(get_db),
+):
     """ Get access token using JSON instead of form data """
+    origin = BrowserSessionHelper.get_browser_origin(request)
     user = AuthService.authenticate_user(db, signin_data.username, signin_data.password)
     if not user:
         raise HTTPException(
@@ -50,28 +55,40 @@ def get_access_token_json(signin_data: SigninSchema, db: Session = Depends(get_d
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Create tokens using AuthService
-    tokens = AuthService.create_user_tokens(user.id)
-    return tokens
+    if origin:
+        AuthService.revoke_session(db, BrowserSessionHelper.get_submitted_refresh_token(request, None))
+
+    return BrowserSessionHelper.prepare_tokens_response(response, AuthService.create_user_tokens(db, user), origin)
 
 
 @router.post("/refresh_token/", response_model=TokenSchema)
-def refresh_access_token(refresh_request: RefreshTokenSchema, db: Session = Depends(get_db)):
+def refresh_access_token(
+    request: Request, response: Response,
+    refresh_request: RefreshTokenSchema | None = None, db: Session = Depends(get_db),
+):
     """ Get a new access token using a refresh token """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid refresh token",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    refresh_token = BrowserSessionHelper.get_submitted_refresh_token(request, refresh_request)
+    tokens = AuthService.refresh_user_tokens(db, refresh_token)
+    response.headers['Cache-Control'] = 'no-store'
 
-    # Validate refresh token and get user
-    user = AuthService.validate_refresh_token(db, refresh_request.refresh_token)
-    if user is None:
-        raise credentials_exception
+    if request.headers.get(BrowserSessionHelper.BROWSER_SESSION_HEADER) == BrowserSessionHelper.BROWSER_SESSION_VALUE:
+        tokens['refresh_token'] = None
 
-    # Create new tokens using AuthService
-    tokens = AuthService.create_user_tokens(user.id)
     return tokens
+
+
+@router.post("/logout/", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    request: Request, response: Response,
+    refresh_request: RefreshTokenSchema | None = None, db: Session = Depends(get_db),
+):
+    AuthService.revoke_session(db, BrowserSessionHelper.get_submitted_refresh_token(request, refresh_request))
+    origin = BrowserSessionHelper.get_browser_origin(request)
+    if not origin:
+        return
+
+    name, path, secure = BrowserSessionHelper.get_browser_cookie(origin)
+    response.delete_cookie(name, path=path, secure=secure, httponly=True, samesite='lax')
 
 
 @router.get("/user/", response_model=UserSchema)
@@ -119,7 +136,10 @@ def change_password(
 
 
 @router.post('/google/', response_model=TokenSchema)
-def google_signin(signin_data: GoogleSigninSchema, db: Session = Depends(get_db)):
+def google_signin(
+    signin_data: GoogleSigninSchema, request: Request, response: Response, db: Session = Depends(get_db),
+):
+    origin = BrowserSessionHelper.get_browser_origin(request)
     token_info = AuthService.exchange_google_code(signin_data.code)
     if not token_info:
         raise HTTPException(
@@ -130,7 +150,7 @@ def google_signin(signin_data: GoogleSigninSchema, db: Session = Depends(get_db)
 
     google_id = token_info.get('sub')
     email = token_info.get('email')
-    if not google_id or not email:
+    if not google_id or not email or token_info.get('email_verified') is not True:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Missing information in Google token'
@@ -142,6 +162,8 @@ def google_signin(signin_data: GoogleSigninSchema, db: Session = Depends(get_db)
             status_code=status.HTTP_404_NOT_FOUND,
             detail='User not found'
         )
-    tokens = AuthService.create_user_tokens(user.id)
 
-    return tokens
+    if origin:
+        AuthService.revoke_session(db, BrowserSessionHelper.get_submitted_refresh_token(request, None))
+
+    return BrowserSessionHelper.prepare_tokens_response(response, AuthService.create_user_tokens(db, user), origin)

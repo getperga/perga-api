@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.const.notes import NotesFolderType
-from app.models.user import User
+from app.models import User
 from app.schemas.notes import NoteCreateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema, NotesFolderUpdateSchema
 from app.services.notes_service import NoteService
