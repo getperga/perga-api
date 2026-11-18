@@ -15,4 +15,5 @@ os.environ.setdefault("POSTGRES_DB", "test_db")
 pytest_plugins = [
     'app.tests.fixtures.auth',
     'app.tests.fixtures.database',
+    'app.tests.fixtures.notes',
 ]

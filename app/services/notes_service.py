@@ -1,13 +1,15 @@
 import nh3
 import re
 from bs4 import BeautifulSoup
+
+from fastapi import HTTPException
 from sqlalchemy import case, func, literal, or_
 from sqlalchemy.orm import Session
 
 from app.const.notes import NOTE_BODY_ALLOWED_ATTRIBUTES, NOTE_BODY_ALLOWED_TAGS, NOTE_BODY_ALLOWED_PROTOCOLS
 from app.core.index_utils import set_sequential_indexes
-from app.models.notes import Note
-from app.schemas.notes import NoteCreateSchema, NoteUpdateSchema
+from app.models import Note
+from app.schemas.notes import NoteAppendSchema, NoteCreateSchema, NoteUpdateSchema
 from app.services.base_service import BaseService
 from app.services.notes_attachments_service import NotesAttachmentsService
 from app.services.notes_folders_service import NotesFolderService
@@ -19,6 +21,7 @@ class NoteService(BaseService[Note]):
     SEARCH_CONFIG = 'english'
     MIN_FUZZY_QUERY_LENGTH = 3
     MAX_PREFIX_TERMS = 10
+    APPEND_NON_TEXT_CONTENT_TAGS = {'img', 'hr'}
 
     @staticmethod
     def _filter_html_attrs(tag: str, attr: str, value: str) -> str | None:
@@ -185,6 +188,26 @@ class NoteService(BaseService[Note]):
 
         for field, value in update_data_dict.items():
             setattr(db_note, field, value)
+        db.commit()
+
+        db.refresh(db_note)
+        return db_note
+
+    @classmethod
+    def append_to_note(cls, db: Session, note_id: int, user_id: int, append_data: NoteAppendSchema) -> Note:
+        """ Appends sanitized HTML while holding note row lock until commit """
+        db_note = NotesAttachmentsService.get_note(db, note_id, user_id, lock=True, editable=True)
+
+        fragment = cls._clean_html(append_data.body)
+        if not cls.extract_plain_text(fragment) and not BeautifulSoup(fragment, 'html.parser').find(
+            cls.APPEND_NON_TEXT_CONTENT_TAGS,
+        ):
+            raise HTTPException(422, 'Appended body must not be empty')
+
+        body = cls._clean_html((db_note.body or '') + fragment)
+        body = cls._clean_html(NotesAttachmentsService.synchronize_body(db, db_note, body))
+        db_note.body = body
+        db_note.body_plain_text = cls.extract_plain_text(body)
         db.commit()
 
         db.refresh(db_note)

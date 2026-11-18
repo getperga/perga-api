@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class NoteCreateSchema(BaseModel):
@@ -15,6 +15,12 @@ class NoteUpdateSchema(BaseModel):
     title: str = None
     body: str = None
     is_pinned: bool = False
+
+
+class NoteAppendSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    body: str
 
 
 # NoteSchema without body to reduce get_folders response size
