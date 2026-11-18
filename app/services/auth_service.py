@@ -1,17 +1,21 @@
+import datetime as dt
+import jwt
 import requests
+from uuid import uuid4
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
-from jose import JWTError, jwt
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.const.auth import SIGNING_ALGORITHM, TokenType
+from app.const.auth import REFRESH_TOKEN_EXPIRE_DAYS, SIGNING_ALGORITHM, TokenType
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.user import User
+from app.helpers import AuthHelper
+from app.models import AuthSession, User
 from app.schemas.auth import GoogleTokenInfo
-from app.services.auth_utils import validate_password, create_access_token, create_refresh_token
 from app.services.user_service import UserService
 
 # OAuth2 scheme for token authentication
@@ -50,59 +54,91 @@ class AuthService:
         if (
             not user
             or not user.hashed_password
-            or not validate_password(password, user.hashed_password)
+            or not AuthHelper.validate_password(password, user.hashed_password)
             or not user.is_active
         ):
             return None
         return user
 
     @classmethod
-    def create_user_tokens(cls, user_id: int) -> dict:
-        """ Creates and returns dict with access and refresh tokens """
-        data = {'sub': user_id}
+    def create_user_tokens(cls, db: Session, user: User) -> dict:
+        lifetime = dt.timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        session = AuthSession(
+            id=str(uuid4()),
+            user_id=user.id,
+            auth_epoch=user.auth_epoch,
+            expires_at=dt.datetime.now(dt.timezone.utc) + lifetime,
+        )
+
+        data = {'sub': user.id, 'sid': session.id}
+        refresh_token = AuthHelper.create_refresh_token(data, custom_timeout=lifetime)
+        tokens = cls._token_pair(data, refresh_token)
+
+        db.query(AuthSession).filter(AuthSession.user_id == user.id, AuthSession.expires_at <= func.now()).delete()
+        db.add(session)
+        db.commit()
+
+        return tokens
+
+    @staticmethod
+    def _token_pair(data: dict, refresh_token: str) -> dict:
         return {
             'token_type': TokenType.BEARER,
-            'access_token': create_access_token(data=data),
-            'refresh_token': create_refresh_token(data=data)
+            'access_token': AuthHelper.create_access_token(data),
+            'refresh_token': refresh_token,
         }
 
     @classmethod
-    def validate_refresh_token(cls, db: Session, refresh_token: str) -> User | None:
-        """ Validates refresh token and return the associated user """
+    def _active_session(cls, db: Session, token: str, token_type: TokenType) -> tuple[User, AuthSession] | None:
         try:
-            payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
-        except JWTError:
-            return None
-
-        if payload.get('token_type') != TokenType.REFRESH:
+            payload = jwt.decode(
+                token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM],
+                audience=AuthHelper.get_token_audience(token_type),
+                options={'require': ['sub', 'exp', 'aud', 'token_type', 'sid']},
+            )
+        except jwt.InvalidTokenError:
             return None
 
         user_id = cls._extract_user_id(payload)
-        if not user_id:
+        session_id = payload['sid']
+        if payload['token_type'] != token_type or not user_id or not isinstance(session_id, str):
             return None
 
-        user = UserService.get_user_by_id(db, user_id=user_id)
-        if not user or not user.is_active:
-            return None
+        return db.query(User, AuthSession).join(AuthSession, AuthSession.user_id == User.id).filter(
+            AuthSession.id == session_id,
+            AuthSession.expires_at > func.now(),
+            AuthSession.auth_epoch == User.auth_epoch,
+            User.id == user_id,
+            User.is_active.is_(True),
+            User.is_deleted.is_(False),
+        ).populate_existing().first()
 
-        return user
+    @classmethod
+    def refresh_user_tokens(cls, db: Session, refresh_token: str) -> dict:
+        result = cls._active_session(db, refresh_token, TokenType.REFRESH)
+        if not result:
+            raise cls.CREDENTIALS_EXCEPTION
+
+        user, session = result
+        return cls._token_pair({'sub': user.id, 'sid': session.id}, refresh_token)
+
+    @classmethod
+    def revoke_session(cls, db: Session, refresh_token: str) -> None:
+        result = cls._active_session(db, refresh_token, TokenType.REFRESH)
+        if not result:
+            return
+
+        _, session = result
+        db.delete(session)
+        db.commit()
 
     @classmethod
     async def get_current_user(cls, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-        """ Gets the current user from the access token or raises an exception """
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
-        except JWTError:
+        result = cls._active_session(db, token, TokenType.ACCESS)
+        if not result:
             raise cls.CREDENTIALS_EXCEPTION
 
-        user_id = cls._extract_user_id(payload)
-        if user_id is None:
-            raise cls.CREDENTIALS_EXCEPTION
-
-        user = UserService.get_user_by_id(db, user_id=user_id)
-        if user is None or not user.is_active:
-            raise cls.CREDENTIALS_EXCEPTION
-            
+        user, _ = result
         return user
 
     @classmethod
@@ -134,7 +170,7 @@ class AuthService:
             'grant_type': 'authorization_code',
         }
 
-        response = requests.post(cls.GOOGLE_TOKENS_URL, data=data)
+        response = requests.post(cls.GOOGLE_TOKENS_URL, data=data, timeout=10)
         if response.status_code != 200:
             return None
 

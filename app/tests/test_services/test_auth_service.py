@@ -1,13 +1,14 @@
+import datetime as dt
+import jwt
 import pytest
+
 from fastapi import HTTPException
-from jose import jwt
-from unittest.mock import patch
 
 from app.const.auth import SIGNING_ALGORITHM, TokenType
 from app.core.config import settings
-from app.models.user import User
+from app.helpers import AuthHelper
+from app.models import User
 from app.services.auth_service import AuthService
-from app.services.auth_utils import create_access_token, create_refresh_token, generate_password_hash
 from app.services.user_service import UserService
 from app.tests.const import TEST_USERNAME, TEST_EMAIL, TEST_PASSWORD
 
@@ -18,7 +19,7 @@ class TestAuthService:
         user = User(
             username=TEST_USERNAME,
             email=TEST_EMAIL,
-            hashed_password=generate_password_hash(TEST_PASSWORD),
+            hashed_password=AuthHelper.generate_password_hash(TEST_PASSWORD),
             is_active=True,
         )
         test_db.add(user)
@@ -37,7 +38,7 @@ class TestAuthService:
         user = User(
             username=TEST_USERNAME,
             email=TEST_EMAIL,
-            hashed_password=generate_password_hash(TEST_PASSWORD),
+            hashed_password=AuthHelper.generate_password_hash(TEST_PASSWORD),
             is_active=True,
         )
         test_db.add(user)
@@ -52,9 +53,9 @@ class TestAuthService:
         authenticated_user = AuthService.authenticate_user(test_db, 'nonexistent@example.com', TEST_PASSWORD)
         assert authenticated_user is None
 
-    def test_create_user_tokens(self, test_user):
+    def test_create_user_tokens(self, test_db, test_user):
         # Create tokens for the test user
-        tokens = AuthService.create_user_tokens(test_user.id)
+        tokens = AuthService.create_user_tokens(test_db, test_user)
         
         # Check that the response contains the expected keys
         assert 'access_token' in tokens
@@ -63,109 +64,177 @@ class TestAuthService:
         assert tokens['token_type'] == TokenType.BEARER
         
         # Decode the access token and verify its contents
-        access_payload = jwt.decode(tokens['access_token'], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        access_payload = jwt.decode(
+            tokens['access_token'], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False},
+        )
         assert access_payload['sub'] == str(test_user.id)
         assert access_payload['token_type'] == TokenType.ACCESS
         
         # Decode the refresh token and verify its contents
-        refresh_payload = jwt.decode(tokens['refresh_token'], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        refresh_payload = jwt.decode(
+            tokens['refresh_token'], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False},
+        )
         assert refresh_payload['sub'] == str(test_user.id)
         assert refresh_payload['token_type'] == TokenType.REFRESH
 
-    def test_validate_refresh_token_valid(self, test_db, test_user):
-        # Create a refresh token for the test user
-        refresh_token = create_refresh_token({'sub': test_user.id})
-        
-        # Validate the refresh token
-        user = AuthService.validate_refresh_token(test_db, refresh_token)
-        
-        assert user is not None
-        assert user.id == test_user.id
+    def test_refresh_stays_inside_the_existing_session(self, test_db, test_user):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        renewed = AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert renewed['refresh_token'] == tokens['refresh_token']
 
-    def test_validate_refresh_token_invalid(self, test_db, test_user):
-        # Create an access token (not a refresh token)
-        access_token = create_access_token({'sub': test_user.id})
-        
-        # Validate the access token as a refresh token (should fail)
-        user = AuthService.validate_refresh_token(test_db, access_token)
-        assert user is None
-        
-        # Validate the invalid token
+    @pytest.mark.anyio
+    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
+    async def test_access_and_refresh_tokens_have_distinct_scopes(self, test_db, test_user):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        assert (await AuthService.get_current_user(tokens['access_token'], test_db)).id == test_user.id
+        with pytest.raises(HTTPException, match='401'):
+            AuthService.refresh_user_tokens(test_db, tokens['access_token'])
+        with pytest.raises(HTTPException, match='401'):
+            await AuthService.get_current_user(tokens['refresh_token'], test_db)
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
+    async def test_malformed_tokens_are_rejected(self, test_db):
         invalid_token = 'invalid.token.string'
-        user = AuthService.validate_refresh_token(test_db, invalid_token)
-        assert user is None
 
-    def test_validate_refresh_token_nonexistent_user(self, test_db):
-        # Validate the refresh token
-        refresh_token = create_refresh_token({'sub': 999})
-        user = AuthService.validate_refresh_token(test_db, refresh_token)
-        assert user is None
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(invalid_token, test_db)
+        assert access_error.value.status_code == 401
 
-    @pytest.mark.anyio
-    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
-    @patch('app.services.auth_service.jwt.decode')
-    async def test_get_current_user_success(self, mock_decode, test_db, test_user):
-        # Mock the jwt.decode function to return a payload with the test user's ID
-        mock_decode.return_value = {'sub': str(test_user.id)}
-        
-        # Get the current user
-        user = await AuthService.get_current_user('valid_token', test_db)
-        assert user is not None
-        assert user.id == test_user.id
-        
-        # Verify that jwt.decode was called with the expected arguments
-        mock_decode.assert_called_once_with('valid_token', settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, invalid_token)
+        assert refresh_error.value.status_code == 401
 
     @pytest.mark.anyio
     @pytest.mark.parametrize('anyio_backend', ['asyncio'])
-    @patch('app.services.auth_service.jwt.decode')
-    async def test_get_current_user_jwt_error(self, mock_decode, test_db):
-        # Mock the jwt.decode function to raise a JWTError
-        mock_decode.side_effect = jwt.JWTError()
-        
-        # Attempt to get the current user with an invalid token
-        with pytest.raises(Exception) as excinfo:
-            await AuthService.get_current_user('invalid_token', test_db)
-        
-        # Check that the exception is an HTTPException with status code 401
-        assert excinfo.value.status_code == 401
-        assert 'Could not validate credentials' in excinfo.value.detail
+    @pytest.mark.parametrize('claim', ['sub', 'exp', 'aud', 'token_type', 'sid'])
+    async def test_tokens_missing_required_claims_are_rejected(self, test_db, test_user, claim):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        for token_type in (TokenType.ACCESS, TokenType.REFRESH):
+            token_key = f'{token_type.value}_token'
+            payload = jwt.decode(
+                tokens[token_key], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM],
+                audience=AuthHelper.get_token_audience(token_type),
+            )
+            del payload[claim]
+            tokens[token_key] = jwt.encode(payload, settings.SECRET_KEY, algorithm=SIGNING_ALGORITHM)
+
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(tokens['access_token'], test_db)
+        assert access_error.value.status_code == 401
+
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert refresh_error.value.status_code == 401
 
     @pytest.mark.anyio
     @pytest.mark.parametrize('anyio_backend', ['asyncio'])
-    @patch('app.services.auth_service.jwt.decode')
-    async def test_get_current_user_missing_sub(self, mock_decode, test_db):
-        # Mock the jwt.decode function to return a payload without a sub claim
-        mock_decode.return_value = {'token_type': TokenType.ACCESS}
-        
-        # Attempt to get the current user with a token missing the sub claim
-        with pytest.raises(Exception) as excinfo:
-            await AuthService.get_current_user('token_without_sub', test_db)
-        
-        # Check that the exception is an HTTPException with status code 401
-        assert excinfo.value.status_code == 401
-        assert 'Could not validate credentials' in excinfo.value.detail
+    @pytest.mark.parametrize('subject', [None, '', 'not_an_integer'])
+    async def test_tokens_with_invalid_subject_are_rejected(self, test_db, test_user, subject):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        for token_type in (TokenType.ACCESS, TokenType.REFRESH):
+            token_key = f'{token_type.value}_token'
+            payload = jwt.decode(
+                tokens[token_key], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM],
+                audience=AuthHelper.get_token_audience(token_type),
+            )
+            payload['sub'] = subject
+            tokens[token_key] = jwt.encode(payload, settings.SECRET_KEY, algorithm=SIGNING_ALGORITHM)
+
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(tokens['access_token'], test_db)
+        assert access_error.value.status_code == 401
+
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert refresh_error.value.status_code == 401
 
     @pytest.mark.anyio
     @pytest.mark.parametrize('anyio_backend', ['asyncio'])
-    @patch('app.services.auth_service.jwt.decode')
-    async def test_get_current_user_invalid_sub(self, mock_decode, test_db):
-        # Mock the jwt.decode function to return a payload with an invalid sub claim
-        mock_decode.return_value = {'sub': 'not_an_integer'}
-        
-        # Attempt to get the current user with a token with an invalid sub claim
-        with pytest.raises(Exception) as excinfo:
-            await AuthService.get_current_user('token_with_invalid_sub', test_db)
-        
-        # Check that the exception is an HTTPException with status code 401
-        assert excinfo.value.status_code == 401
-        assert 'Could not validate credentials' in excinfo.value.detail
+    @pytest.mark.parametrize('token_error', ['expired', 'wrong_signature'])
+    async def test_expired_or_incorrectly_signed_tokens_are_rejected(self, test_db, test_user, token_error):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        for token_type in (TokenType.ACCESS, TokenType.REFRESH):
+            token_key = f'{token_type.value}_token'
+            payload = jwt.decode(
+                tokens[token_key], settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM],
+                audience=AuthHelper.get_token_audience(token_type),
+            )
+            signing_key = settings.SECRET_KEY
+            if token_error == 'expired':
+                payload['exp'] = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1)
+            else:
+                signing_key = f'{settings.SECRET_KEY}-different-key'
+            tokens[token_key] = jwt.encode(payload, signing_key, algorithm=SIGNING_ALGORITHM)
+
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(tokens['access_token'], test_db)
+        assert access_error.value.status_code == 401
+
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert refresh_error.value.status_code == 401
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
+    async def test_tokens_for_deleted_user_are_rejected(self, test_db, test_user):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        test_db.delete(test_user)
+        test_db.commit()
+
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(tokens['access_token'], test_db)
+        assert access_error.value.status_code == 401
+
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert refresh_error.value.status_code == 401
+
+    def test_logout_revokes_only_its_session(self, test_db, test_user):
+        first = AuthService.create_user_tokens(test_db, test_user)
+        second = AuthService.create_user_tokens(test_db, test_user)
+        AuthService.revoke_session(test_db, first['refresh_token'])
+        with pytest.raises(HTTPException, match='401'):
+            AuthService.refresh_user_tokens(test_db, first['refresh_token'])
+        assert AuthService.refresh_user_tokens(test_db, second['refresh_token'])
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
+    @pytest.mark.parametrize('change, value', [
+        ('hashed_password', 'changed-password'),
+        ('is_active', False),
+        ('is_deleted', True),
+    ])
+    async def test_account_changes_invalidate_existing_sessions(self, test_db, test_user, change, value):
+        tokens = AuthService.create_user_tokens(test_db, test_user)
+        setattr(test_user, change, value)
+        test_db.commit()
+
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(tokens['access_token'], test_db)
+        assert access_error.value.status_code == 401
+
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert refresh_error.value.status_code == 401
+
+        if change in {'is_active', 'is_deleted'}:
+            setattr(test_user, change, not value)
+            test_db.commit()
+
+        with pytest.raises(HTTPException) as access_error:
+            await AuthService.get_current_user(tokens['access_token'], test_db)
+        assert access_error.value.status_code == 401
+
+        with pytest.raises(HTTPException) as refresh_error:
+            AuthService.refresh_user_tokens(test_db, tokens['refresh_token'])
+        assert refresh_error.value.status_code == 401
 
     def test_authenticate_user_inactive(self, test_db):
         user = User(
             username=TEST_USERNAME,
             email=TEST_EMAIL,
-            hashed_password=generate_password_hash(TEST_PASSWORD),
+            hashed_password=AuthHelper.generate_password_hash(TEST_PASSWORD),
             is_active=False,
         )
         test_db.add(user)
@@ -173,54 +242,6 @@ class TestAuthService:
 
         authenticated_user = AuthService.authenticate_user(test_db, user.username, TEST_PASSWORD)
         assert authenticated_user is None
-
-    def test_validate_refresh_token_inactive(self, test_db):
-        user = User(
-            username=TEST_USERNAME,
-            email=TEST_EMAIL,
-            hashed_password=generate_password_hash(TEST_PASSWORD),
-            is_active=False,
-        )
-        test_db.add(user)
-        test_db.commit()
-
-        refresh_token = create_refresh_token({'sub': user.id})
-        
-        validated_user = AuthService.validate_refresh_token(test_db, refresh_token)
-        assert validated_user is None
-
-    @pytest.mark.anyio
-    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
-    @patch('app.services.auth_service.jwt.decode')
-    async def test_get_current_user_inactive(self, mock_decode, test_db):
-        user = User(
-            username=TEST_USERNAME,
-            email=TEST_EMAIL,
-            hashed_password=generate_password_hash(TEST_PASSWORD),
-            is_active=False,
-        )
-        test_db.add(user)
-        test_db.commit()
-
-        mock_decode.return_value = {'sub': str(user.id)}
-        
-        with pytest.raises(HTTPException) as excinfo:
-            await AuthService.get_current_user('valid_token', test_db)
-        
-        assert excinfo.value.status_code == 401
-        assert 'Could not validate credentials' in excinfo.value.detail
-
-    @pytest.mark.anyio
-    @pytest.mark.parametrize('anyio_backend', ['asyncio'])
-    @patch('app.services.auth_service.jwt.decode')
-    async def test_get_current_user_nonexistent_user(self, mock_decode, test_db):
-        mock_decode.return_value = {'sub': '999'}
-        
-        with pytest.raises(HTTPException) as excinfo:
-            await AuthService.get_current_user('token_for_nonexistent_user', test_db)
-        
-        assert excinfo.value.status_code == 401
-        assert 'Could not validate credentials' in excinfo.value.detail
 
     def test_get_or_create_google_user_inactive(self, test_db):
         google_id = 'google_123'

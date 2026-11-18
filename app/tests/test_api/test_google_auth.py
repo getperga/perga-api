@@ -45,10 +45,10 @@ class TestGoogleAuth:
         google_id = 'google-id-for-existing-user'
         
         user = UserService.get_or_create_google_user(test_db, google_id, email)
-        
-        assert user.id == test_user.id
-        assert user.google_id == google_id
-        assert user.email == email
+        assert user is None
+
+        test_db.refresh(test_user)
+        assert test_user.google_id is None
 
     def test_get_or_create_google_user_existing_google_id(self, test_db):
         google_id = 'unique-google-id'
@@ -71,6 +71,7 @@ class TestGoogleAuth:
                 mock_verify.return_value = {
                     'sub': google_id,
                     'email': email,
+                    'email_verified': True,
                 }
                 
                 response = client.post(
@@ -108,6 +109,7 @@ class TestGoogleAuth:
                     mock_verify.return_value = {
                         'sub': google_id,
                         'email': email,
+                        'email_verified': True,
                     }
                     
                     response = client.post(
