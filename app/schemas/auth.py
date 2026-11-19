@@ -25,3 +25,4 @@ class GoogleSigninSchema(BaseModel):
 class GoogleTokenInfo(TypedDict, total=False):
     sub: str
     email: str
+    email_verified: bool

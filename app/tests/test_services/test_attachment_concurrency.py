@@ -10,8 +10,7 @@ from uuid import uuid4
 
 from app.core.config import settings
 from app.core.file_storage import LocalFileStorage
-from app.models.notes import Note, NotesAttachment, NotesFolder
-from app.models.user import User
+from app.models import User, Note, NotesAttachment, NotesFolder
 from app.schemas.notes import NoteCreateSchema
 from app.services.notes_attachments_service import NotesAttachmentsService
 from app.services.notes_folders_service import NotesFolderService

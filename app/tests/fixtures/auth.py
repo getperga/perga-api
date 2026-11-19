@@ -1,7 +1,8 @@
 import pytest
 
-from app.models.user import User
-from app.services.auth_utils import generate_password_hash, create_access_token
+from app.models.auth import User
+from app.services.auth_service import AuthService
+from app.helpers.auth_helper import AuthHelper
 from app.tests.const import TEST_USERNAME, TEST_EMAIL, TEST_PASSWORD
 
 
@@ -11,7 +12,7 @@ def test_user(test_db):
     user = User(
         username=TEST_USERNAME,
         email=TEST_EMAIL,
-        hashed_password=generate_password_hash(TEST_PASSWORD),
+        hashed_password=AuthHelper.generate_password_hash(TEST_PASSWORD),
         is_active=True,
     )
     test_db.add(user)
@@ -22,6 +23,6 @@ def test_user(test_db):
 
 
 @pytest.fixture(scope="function")
-def auth_headers(test_user):
-    access_token = create_access_token(data={"sub": str(test_user.id)})
+def auth_headers(test_db, test_user):
+    access_token = AuthService.create_user_tokens(test_db, test_user)["access_token"]
     return {"Authorization": f"Bearer {access_token}"}

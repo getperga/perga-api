@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -16,17 +15,10 @@ from app.api.v1 import (
     notes, notes_folders, notes_export, notes_import, notes_attachments,
 )
 
-# Ensure logs directory exists
-logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
-os.makedirs(logs_dir, exist_ok=True)
-
 logging.basicConfig(
     level=settings.LOGGING_LEVEL,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(logs_dir, "app.log"), mode="a", encoding="utf-8")
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 
 logger = logging.getLogger(__name__)

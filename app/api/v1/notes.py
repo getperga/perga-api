@@ -6,6 +6,7 @@ from app.schemas.notes import (
     NoteSchema,
     NoteCreateSchema,
     NoteUpdateSchema,
+    NoteAppendSchema,
     NoteSearchResultSchema,
     PinnedNotesReorderSchema,
 )
@@ -58,6 +59,16 @@ def update_note(
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     return note
+
+
+@router.post('/{note_id}/append/', response_model=NoteSchema)
+def append_note(
+    note_id: int,
+    request_data: NoteAppendSchema,
+    db: Session = Depends(get_db),
+    current_user: UserSchema = Depends(AuthService.get_current_user),
+):
+    return NoteService.append_to_note(db, note_id=note_id, user_id=current_user.id, append_data=request_data)
 
 
 @router.post('/pinned/reorder/', response_model=list[NoteSchema])

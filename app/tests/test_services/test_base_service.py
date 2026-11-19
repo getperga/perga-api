@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.models.user import User
+from app.models import User
 from app.services.base_service import BaseService
 from app.tests.const import TEST_USERNAME, TEST_EMAIL
 

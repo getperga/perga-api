@@ -1,5 +1,6 @@
 from sqlalchemy import (
-    BigInteger, Boolean, CheckConstraint, Column, Computed, ForeignKey, Index, Integer, String, Text, func,
+    BigInteger, Boolean, CheckConstraint, Column, Computed, ForeignKey, ForeignKeyConstraint,
+    Index, Integer, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import deferred, relationship
@@ -24,11 +25,21 @@ class NotesFolder(BaseModel):
 
     # Relationships
     user = relationship('User', back_populates='notes_folders')
-    notes = relationship('Note', back_populates='folder')
-    parent = relationship('NotesFolder', remote_side='NotesFolder.id', back_populates='subfolders')
-    subfolders = relationship('NotesFolder', back_populates='parent', cascade="all, delete-orphan")
+    notes = relationship('Note', foreign_keys='Note.folder_id', back_populates='folder')
+    parent = relationship(
+        'NotesFolder', foreign_keys=[parent_id], remote_side='NotesFolder.id', back_populates='subfolders',
+    )
+    subfolders = relationship(
+        'NotesFolder', foreign_keys=[parent_id], back_populates='parent', cascade='all, delete-orphan',
+    )
 
     __table_args__ = (
+        UniqueConstraint('id', 'user_id', name='uq_notes_folders_id_user_id'),
+        ForeignKeyConstraint(
+            ['parent_id', 'user_id'], ['notes_folders.id', 'notes_folders.user_id'],
+            name='fk_notes_folders_parent_owner',
+        ),
+        CheckConstraint('parent_id <> id', name='ck_notes_folders_not_own_parent'),
         Index(
             'idx_notes_folders_user_root',
             'user_id',
@@ -74,9 +85,13 @@ class Note(BaseModel):
 
     # Relationships
     user = relationship('User', back_populates='notes')
-    folder = relationship('NotesFolder', back_populates='notes')
+    folder = relationship('NotesFolder', foreign_keys=[folder_id], back_populates='notes')
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ['folder_id', 'user_id'], ['notes_folders.id', 'notes_folders.user_id'],
+            name='fk_notes_folder_owner',
+        ),
         Index('idx_notes_search_vector', 'search_vector', postgresql_using='gin'),
         Index(
             'idx_notes_title_trgm',

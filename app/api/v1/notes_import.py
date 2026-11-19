@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.const.notes import IMPORT_SIZE_LIMIT, IMPORT_SIZE_LIMIT_MB
 from app.core.database import get_db
-from app.models.user import User
+from app.models.auth import User
 from app.schemas.notes_import import NotesImportResponseSchema
 from app.services.auth_service import AuthService
 from app.services.notes_folders_service import NotesFolderService
@@ -31,10 +31,8 @@ def import_notes(
         )
 
     # validate provided folder_id or create import folder
-    if folder_id:
-        target_folder = NotesFolderService.get_folder(db, folder_id, current_user.id)
-        if not target_folder:
-            raise HTTPException(status_code=404, detail='Folder not found')
+    if folder_id is not None:
+        target_folder = NotesFolderService.require_destination(db, folder_id, current_user.id)
     else:
         # use root folder for import if no folder_id is provided
         target_folder = NotesFolderService.get_root_folder(db, current_user.id)

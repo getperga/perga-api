@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import URL, make_url
 
 
 class Settings(BaseSettings):
@@ -60,8 +61,12 @@ class Settings(BaseSettings):
         return self
 
     @property
-    def sqlalchemy_database_uri(self) -> str:
-        return f'postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}/{self.POSTGRES_DB}'
+    def sqlalchemy_database_uri(self) -> URL:
+        return make_url(f'postgresql://{self.POSTGRES_HOST}').set(
+            username=self.POSTGRES_USER or '',
+            password=self.POSTGRES_PASSWORD or '',
+            database=self.POSTGRES_DB or '',
+        )
 
     class Config:
         env_file = '.env'

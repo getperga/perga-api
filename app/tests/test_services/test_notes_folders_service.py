@@ -1,6 +1,9 @@
+import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.const.notes import NotesFolderType
+from app.models import User
 from app.schemas.notes import NoteCreateSchema
 from app.schemas.notes_folders import NotesFolderCreateSchema, NotesFolderUpdateSchema
 from app.services.notes_service import NoteService
@@ -53,7 +56,7 @@ class TestNotesFolderService:
         folder = NotesFolderService.create_folder(
             test_db,
             user_id=test_user.id,
-            create_data=NotesFolderCreateSchema(name='To Trash', parent_id=trash_folder.id)
+            create_data=NotesFolderCreateSchema(name='To Trash')
         )
         note = NoteService.create_note(
             test_db,
@@ -61,6 +64,9 @@ class TestNotesFolderService:
             create_data=NoteCreateSchema(title='Note', body='Body', folder_id=folder.id)
         )
         
+        NotesFolderService.update_folder(
+            test_db, folder.id, test_user.id, NotesFolderUpdateSchema(parent_id=trash_folder.id),
+        )
         NotesFolderService.empty_trash(test_db, user_id=test_user.id)
         
         test_db.refresh(folder)
@@ -116,3 +122,21 @@ class TestNotesFolderService:
             update_data=NotesFolderUpdateSchema(parent_id=folder_b.id)
         )
         assert result is None
+
+    def test_owner_constraint_preserves_existing_tree(self, test_db, test_user):
+        owner_folder = NotesFolderService.get_root_folder(test_db, user_id=test_user.id)
+        other = User(username='other-owner', email='other-owner@example.test', is_active=True)
+        test_db.add(other)
+        test_db.commit()
+
+        regular = NotesFolderService.create_folder(
+            test_db, other.id, NotesFolderCreateSchema(name='Other account'),
+        )
+        original_parent = regular.parent_id
+        with pytest.raises(IntegrityError):
+            with test_db.begin_nested():
+                regular.parent_id = owner_folder.id
+                test_db.flush()
+
+        test_db.refresh(regular)
+        assert regular.parent_id == original_parent

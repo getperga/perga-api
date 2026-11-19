@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-trixie
 
 # Install system dependencies for WeasyPrint
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,5 +27,10 @@ COPY alembic/ alembic/
 COPY alembic.ini .
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh \
+    && groupadd --gid 10001 perga \
+    && useradd --uid 10001 --gid perga --no-create-home perga \
+    && install -d -o perga -g perga /app/data/attachments
+ENV PYTHONDONTWRITEBYTECODE=1
+USER 10001:10001
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

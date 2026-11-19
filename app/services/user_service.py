@@ -1,10 +1,11 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.user import User
+from app.helpers import AuthHelper
+from app.models import User
 from app.schemas.user import UserCreateSchema, UserUpdateSchema
 from app.services.base_service import BaseService
-from app.services.auth_utils import generate_password_hash, validate_password
 
 
 class UserService(BaseService[User]):
@@ -39,7 +40,7 @@ class UserService(BaseService[User]):
             raise ValueError('Username already taken')
 
         # Create new user
-        hashed_password = generate_password_hash(create_data.password)
+        hashed_password = AuthHelper.generate_password_hash(create_data.password)
         db_user = User(
             username=create_data.username,
             email=create_data.email,
@@ -76,14 +77,14 @@ class UserService(BaseService[User]):
         if user.hashed_password:
             if not current_password:
                 raise ValueError('Current password is required')
-            if not validate_password(current_password, user.hashed_password):
+            if not AuthHelper.validate_password(current_password, user.hashed_password):
                 raise ValueError('Incorrect current password')
         else:
             # in case of setting new password for google auth user don't need current_password
             if current_password:
                 raise ValueError('Invalid arguments')
 
-        user.hashed_password = generate_password_hash(new_password)
+        user.hashed_password = AuthHelper.generate_password_hash(new_password)
         db.commit()
 
         db.refresh(user)
@@ -98,17 +99,9 @@ class UserService(BaseService[User]):
                 return None
             return user
 
-        # try to get user by email
-        user = cls.get_user_by_email(db, email)
-        if user:
-            if not user.is_active:
-                return None
-            user.google_id = google_id  # link existing user with google_id
-            db.commit()
-            db.refresh(user)
-            return user
-
-        if settings.IS_SIGNUP_DISABLED:
+        # an email match requires explicit account linking after reauthentication
+        email = email.strip().lower()
+        if settings.IS_SIGNUP_DISABLED or db.query(User.id).filter(func.lower(User.email) == email).first():
             return None
 
         # create new user with google_id and no password

@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.7] - 2026-11-19
+
+### Added
+
+- AuthSession model and AuthSessionHelper
+- BrowserSessionHelper
+- notes append api method
+
+### Changed
+
+- JWT auth
+- google auth
+- github workflows
+
+### Fixed
+
+- checking of notes folders owner
+
 ## [1.2.6] - 2026-11-14
 
 ### Added

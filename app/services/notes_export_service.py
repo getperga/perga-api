@@ -234,11 +234,11 @@ class NotesExportService:
     def _get_notes_with_paths(cls, folder: NotesFolder, current_path: str = '') -> list[tuple[Note, str]]:
         items = []
         for note in folder.notes:
-            if not note.is_deleted:
+            if note.user_id == folder.user_id and not note.is_deleted:
                 items.append((note, current_path))
         
         for subfolder in folder.subfolders:
-            if not subfolder.is_deleted:
+            if subfolder.user_id == folder.user_id and not subfolder.is_deleted:
                 name = cls.WHITELIST_FILENAME_CHARS_RE.sub('', subfolder.name).strip(' .')
                 if not name or name.upper() in cls.WINDOWS_RESERVED_FILENAMES:
                     name = f'folder_{subfolder.id}'
@@ -248,9 +248,9 @@ class NotesExportService:
 
     @classmethod
     def _get_all_notes_in_folder(cls, folder: NotesFolder) -> list[Note]:
-        notes = [note for note in folder.notes if not note.is_deleted]
+        notes = [note for note in folder.notes if note.user_id == folder.user_id and not note.is_deleted]
         for subfolder in folder.subfolders:
-            if not subfolder.is_deleted:
+            if subfolder.user_id == folder.user_id and not subfolder.is_deleted:
                 notes.extend(cls._get_all_notes_in_folder(subfolder))
         return notes
 

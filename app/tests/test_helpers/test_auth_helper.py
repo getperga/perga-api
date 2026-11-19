@@ -1,41 +1,38 @@
 import datetime as dt
-from jose import jwt
+import jwt
 
 from app.const.auth import SIGNING_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS, TokenType
 from app.core.config import settings
-from app.services.auth_utils import (
-    generate_password_hash, validate_password, create_token,
-    create_access_token, create_refresh_token,
-)
+from app.helpers.auth_helper import AuthHelper
 from app.tests.const import TEST_PASSWORD
 
 
-class TestAuthUtils:
+class TestAuthHelper:
     TEST_USER_ID = 123
 
     def test_password_hashing(self):
         # Hash a password
-        hashed_password = generate_password_hash(TEST_PASSWORD)
+        hashed_password = AuthHelper.generate_password_hash(TEST_PASSWORD)
         
         # Verify that the hash is different from the original password
         assert hashed_password != TEST_PASSWORD
         
         # Verify that the password can be verified against the hash
-        assert validate_password(TEST_PASSWORD, hashed_password) is True
+        assert AuthHelper.validate_password(TEST_PASSWORD, hashed_password) is True
         
         # Verify that an incorrect password fails verification
-        assert validate_password('wrong_password', hashed_password) is False
+        assert AuthHelper.validate_password('wrong_password', hashed_password) is False
         
         # Verify that an invalid hash format is handled gracefully
-        assert validate_password(TEST_PASSWORD, 'invalid_hash_format') is False
+        assert AuthHelper.validate_password(TEST_PASSWORD, 'invalid_hash_format') is False
 
     def test_create_token(self):
         # Create a token with custom data
         data = {'sub': str(self.TEST_USER_ID)}
-        token = create_token(data)
+        token = AuthHelper.create_token(data)
         
         # Decode the token and verify its contents
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         assert payload['sub'] == str(self.TEST_USER_ID)
         assert payload['token_type'] == TokenType.ACCESS
         
@@ -47,8 +44,8 @@ class TestAuthUtils:
         
         # Create a token with a custom expiration time
         custom_expires = dt.timedelta(minutes=30)
-        token = create_token(data, custom_timeout=custom_expires)
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        token = AuthHelper.create_token(data, custom_timeout=custom_expires)
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         exp_time = dt.datetime.fromtimestamp(payload["exp"], tz=dt.timezone.utc)
         expected_exp_time = dt.datetime.now(dt.timezone.utc) + custom_expires
         # Allow for a small difference due to processing time
@@ -57,10 +54,10 @@ class TestAuthUtils:
     def test_create_access_token(self):
         # Create an access token
         data = {'sub': str(self.TEST_USER_ID)}
-        token = create_access_token(data)
+        token = AuthHelper.create_access_token(data)
         
         # Decode the token and verify its contents
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         assert payload['sub'] == str(self.TEST_USER_ID)
         assert payload['token_type'] == TokenType.ACCESS
         
@@ -72,8 +69,8 @@ class TestAuthUtils:
         
         # Create an access token with a custom expiration time
         custom_expires = dt.timedelta(minutes=20)
-        token = create_access_token(data, custom_timeout=custom_expires)
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        token = AuthHelper.create_access_token(data, custom_timeout=custom_expires)
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         exp_time = dt.datetime.fromtimestamp(payload['exp'], tz=dt.timezone.utc)
         expected_exp_time = dt.datetime.now(dt.timezone.utc) + custom_expires
         # Allow for a small difference due to processing time
@@ -82,10 +79,10 @@ class TestAuthUtils:
     def test_create_refresh_token(self):
         # Create a refresh token
         data = {'sub': str(self.TEST_USER_ID)}
-        token = create_refresh_token(data)
+        token = AuthHelper.create_refresh_token(data)
         
         # Decode the token and verify its contents
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         assert payload['sub'] == str(self.TEST_USER_ID)
         assert payload['token_type'] == TokenType.REFRESH
         
@@ -97,8 +94,8 @@ class TestAuthUtils:
         
         # Create a refresh token with a custom expiration time
         custom_expires = dt.timedelta(days=7)
-        token = create_refresh_token(data, custom_timeout=custom_expires)
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        token = AuthHelper.create_refresh_token(data, custom_timeout=custom_expires)
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         exp_time = dt.datetime.fromtimestamp(payload['exp'], tz=dt.timezone.utc)
         expected_exp_time = dt.datetime.now(dt.timezone.utc) + custom_expires
         # Allow for a small difference due to processing time
@@ -107,9 +104,9 @@ class TestAuthUtils:
     def test_token_with_integer_sub(self):
         # Create a token with an integer sub
         data = {'sub': self.TEST_USER_ID}
-        token = create_token(data)
+        token = AuthHelper.create_token(data)
         
         # Decode the token and verify that sub is a string
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[SIGNING_ALGORITHM], options={'verify_aud': False})
         assert payload['sub'] == str(self.TEST_USER_ID)
         assert isinstance(payload['sub'], str)
