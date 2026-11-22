@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.8] - 2026-11-22
+
+### Added
+
+- constraint.txt for transitive libs
+
+### Fixed
+
+- build nginx with stable zlib version
+- versions in dockerfile
+- limit auth requests in nginx config
+
 ## [1.2.7] - 2026-11-19
 
 ### Added
