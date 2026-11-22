@@ -47,7 +47,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    expose_headers=['Content-Disposition'],
+    expose_headers=['Content-Disposition', 'Retry-After'],
 )
 
 # Attachments storage
@@ -79,3 +79,16 @@ def root():
 @app.get('/health/')
 def health():
     return Response(content='OK', status_code=status.HTTP_200_OK)
+
+# nginx redirects rejected requests here so 429 replies use the API CORS allowlist
+@app.get('/_internal/rate-limited', include_in_schema=False)
+def rate_limited():
+    """ Returns a proxy rate-limit response through the configured CORS middleware."""
+    return JSONResponse(
+        {'detail': 'Too many authentication requests'},
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={
+            'Retry-After': '60',  # in seconds
+            'Cache-Control': 'no-store'
+        },
+    )
