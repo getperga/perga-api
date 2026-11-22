@@ -10,6 +10,7 @@
 
 - build nginx with stable zlib version
 - versions in dockerfile
+- limit auth requests in nginx config
 
 ## [1.2.7] - 2026-11-19
 
